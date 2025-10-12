@@ -115,7 +115,7 @@ jobs:
 
         The following Crossplane package was published as part of this PR:
 
-        Package: `${{ steps.lowercase.outputs.repo }}`
+        Package: ghcr.io/${{ steps.lowercase.outputs.owner }}/${{ steps.lowercase.outputs.repo }}:${{ inputs.tag }}
 
         [View Package](https://github.com/${{ steps.lowercase.outputs.owner }}/${{ steps.lowercase.outputs.repo }}/pkgs/container/${{ steps.lowercase.outputs.repo }})
         EOL
