@@ -29,7 +29,7 @@ permissions:
   packages: write
 
 jobs:
-  up:
+  publish:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -87,3 +87,57 @@ jobs:
           push-project: true
           skip-login-check: true
           tag: ${{ inputs.tag }}
+
+  # Add PR comment with published package
+  pr-comment:
+    needs: publish
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    permissions:
+      pull-requests: write
+
+    steps:
+    - name: Set lowercase names
+      id: lowercase
+      run: |
+        echo "owner=$(echo ${{ github.repository_owner }} | tr '[:upper:]' '[:lower:]')" >> $GITHUB_OUTPUT
+        echo "repo=$(echo ${{ github.event.repository.name }} | tr '[:upper:]' '[:lower:]')" >> $GITHUB_OUTPUT
+
+    - name: Generate Comment Body
+      id: comment-body
+      run: |
+        # Create a file for the comment body
+        COMMENT_FILE="comment_body.md"
+
+        # Write the comment body
+        cat > $COMMENT_FILE << EOL
+        ## Published Crossplane Package
+
+        The following Crossplane package was published as part of this PR:
+
+        Package: ${{ inputs.tag }}
+
+        [View Package](https://github.com/${{ steps.lowercase.outputs.owner }}/${{ steps.lowercase.outputs.repo }}/pkgs/container/${{ steps.lowercase.outputs.repo }})
+        EOL
+
+        # Set the output to the file content
+        body=$(cat $COMMENT_FILE)
+        echo "body<<EOF" >> $GITHUB_OUTPUT
+        echo "$body" >> $GITHUB_OUTPUT
+        echo "EOF" >> $GITHUB_OUTPUT
+
+    - name: Find Comment
+      uses: peter-evans/find-comment@v3
+      id: fc
+      with:
+        issue-number: ${{ github.event.pull_request.number }}
+        comment-author: 'github-actions[bot]'
+        body-includes: Published Crossplane Package
+
+    - name: Create or update comment
+      uses: peter-evans/create-or-update-comment@v4
+      with:
+        comment-id: ${{ steps.fc.outputs.comment-id }}
+        issue-number: ${{ github.event.pull_request.number }}
+        body: ${{ steps.comment-body.outputs.body }}
+        edit-mode: replace
