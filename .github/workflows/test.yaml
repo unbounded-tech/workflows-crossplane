@@ -20,10 +20,8 @@ on:
         required: false
 
 permissions:
-  packages: write
-  contents: write
-  issues: write
-  pull-requests: write
+  contents: read
+  packages: read
 
 jobs:
   up:
