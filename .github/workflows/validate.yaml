@@ -45,7 +45,7 @@ permissions:
   packages: read
 
 jobs:
-  up:
+  validate:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
