@@ -7,7 +7,7 @@ on:
         description: 'ghcr user'
         required: false
         type: string
-        
+
       composition_path:
         description: 'Path to your composition YAML'
         required: true
@@ -28,6 +28,12 @@ on:
         description: 'Path to your API directory'
         required: true
         type: string
+
+      error_on_missing_schemas:
+        description: 'Whether to error on missing schemas during validation'
+        required: false
+        type: boolean
+        default: true
 
     secrets:
       GH_PAT:
@@ -103,8 +109,12 @@ jobs:
 
       - name: Validate rendered composition example
         run: |
+          flag=""
+          if [ "${{ inputs.error_on_missing_schemas }}" = "true" ]; then
+            flag="--error-on-missing-schemas"
+          fi
           up composition render \
             ${{ inputs.composition_path }} \
             ${{ inputs.example_path }} \
             --include-full-xr --quiet \
-          | ./crossplane beta validate ${{ inputs.api_path }} --error-on-missing-schemas -
+          | ./crossplane beta validate ${{ inputs.api_path }} $flag -
