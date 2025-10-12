@@ -1,0 +1,112 @@
+name: quality
+
+on:
+  workflow_call:
+    inputs:
+      ghcr_user:
+        description: 'ghcr user'
+        required: false
+        type: string
+        
+      composition_path:
+        description: 'Path to your composition YAML'
+        required: true
+        type: string
+
+      example_path:
+        description: 'Path to your example YAML'
+        required: true
+        type: string
+
+      crossplane_version:
+        description: 'Crossplane CLI version to install'
+        required: false
+        type: string
+        default: 'v2.0.2'
+
+      api_path:
+        description: 'Path to your API directory'
+        required: true
+        type: string
+
+    secrets:
+      GH_PAT:
+        description: 'Token for ghcr.io package write access'
+        required: false
+
+permissions:
+  packages: write
+  contents: write
+  issues: write
+  pull-requests: write
+
+jobs:
+  up:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Cache upbound + crossplane
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.crossplane/cache
+            ~/.up/cache
+          key: ${{ runner.os }}-crossplane-${{ hashFiles('**/upbound.yaml','**/definition.yaml') }}-
+
+      - name: Install & login with up
+        uses: upbound/action-up@v1.0.0
+        with:
+          skip-login: true
+
+      - name: Install Crossplane CLI
+        run: |
+          curl -sL https://raw.githubusercontent.com/crossplane/crossplane/master/install.sh \
+            | XP_VERSION=${{ inputs.crossplane_version }} sh
+
+      - name: check for GH_PAT if ghcr_user is set
+        if: inputs.ghcr_user
+        run: |
+          if [ -z "${{ secrets.GH_PAT }}" ]; then
+            echo "GH_PAT secret must be set if ghcr_user is set"
+            exit 1
+          fi
+
+      - name: Docker login to GHCR
+        if: inputs.ghcr_user
+        uses: docker/login-action@v3.6.0
+        with:
+          registry: ghcr.io
+          username: ${{ inputs.ghcr_user }}
+          password: ${{ secrets.GH_PAT }}
+
+      - name: Docker login to GHCR
+        uses: docker/login-action@v3.6.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+
+      - name: Build with up
+        uses: upbound/action-up-project@v1.1.2
+        with:
+          skip-login-check: true
+
+      - name: Render composition example
+        run: |
+          up composition render \
+            ${{ inputs.composition_path }} \
+            ${{ inputs.example_path }}
+
+      - name: Validate
+        run: |
+          ./crossplane beta validate examples ${{ inputs.api_path }}
+
+      - name: Validate rendered composition example
+        run: |
+          up composition render \
+            ${{ inputs.composition_path }} \
+            ${{ inputs.example_path }} \
+            --include-full-xr --quiet \
+          | ./crossplane beta validate ${{ inputs.api_path }} --error-on-missing-schemas -
