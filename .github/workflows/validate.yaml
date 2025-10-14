@@ -51,7 +51,8 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        include: ${{ fromJSON(inputs.examples) }}
+        example: ${{ fromJSON(inputs.examples) }}
+
     steps:
       - name: Checkout
         uses: actions/checkout@v5
