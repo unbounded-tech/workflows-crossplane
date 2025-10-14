@@ -104,17 +104,17 @@ jobs:
         with:
           skip-login-check: true
 
-      - name: Render composition example
+      - name: Render Example
         run: |
           up composition render \
             ${{ inputs.api_path }}/${{ inputs.composition }} \
             ${{ matrix.example }}
 
-      - name: Validate
+      - name: Validate Example
         run: |
-          ./crossplane beta validate examples ${{ inputs.api_path }}
+          ./crossplane beta validate ${{ matrix.example }} ${{ inputs.api_path }}
 
-      - name: Validate rendered composition example
+      - name: Validate Rendered Example
         run: |
           flag=""
           if [ "${{ inputs.error_on_missing_schemas }}" = "true" ]; then
