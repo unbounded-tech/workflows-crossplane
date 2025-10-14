@@ -8,15 +8,17 @@ on:
         required: false
         type: string
 
-      composition_path:
-        description: 'Path to your composition YAML'
-        required: true
+      composition:
+        description: 'Composition YAML filename (default: composition.yaml)'
+        required: false
         type: string
+        default: 'composition.yaml'
 
-      example_path:
-        description: 'Path to your example YAML'
+      examples:
+        description: 'JSON array of example objects'
         required: true
         type: string
+        default: '[]'
 
       crossplane_version:
         description: 'Crossplane CLI version to install'
@@ -47,6 +49,11 @@ permissions:
 jobs:
   validate:
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false # See all results
+      matrix:
+        example: ${{ fromJSON(inputs.examples) }}
+
     steps:
       - name: Checkout
         uses: actions/checkout@v5
@@ -97,24 +104,24 @@ jobs:
         with:
           skip-login-check: true
 
-      - name: Render composition example
+      - name: Render Example
         run: |
           up composition render \
-            ${{ inputs.composition_path }} \
-            ${{ inputs.example_path }}
+            ${{ inputs.api_path }}/${{ inputs.composition }} \
+            ${{ matrix.example }}
 
-      - name: Validate
+      - name: Validate Example
         run: |
-          ./crossplane beta validate examples ${{ inputs.api_path }}
+          ./crossplane beta validate ${{ matrix.example }} ${{ inputs.api_path }}
 
-      - name: Validate rendered composition example
+      - name: Validate Rendered Example
         run: |
           flag=""
           if [ "${{ inputs.error_on_missing_schemas }}" = "true" ]; then
             flag="--error-on-missing-schemas"
           fi
           up composition render \
-            ${{ inputs.composition_path }} \
-            ${{ inputs.example_path }} \
+            ${{ inputs.api_path }}/${{ inputs.composition }} \
+            ${{ matrix.example }} \
             --include-full-xr --quiet \
           | ./crossplane beta validate ${{ inputs.api_path }} $flag -
