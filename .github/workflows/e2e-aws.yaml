@@ -14,7 +14,7 @@ on:
         type: string
         default: 'v2.0.2'
 
-      e2e_test_path:
+      path:
         description: 'Path to AWS credentials file'
         required: false
         type: string
@@ -92,11 +92,11 @@ jobs:
 
       - name: Create AWS Credentials
         run: |
-          mkdir -p ${{ inputs.e2e_test_path }}
-          echo "[default]" > ${{ inputs.e2e_test_path }}/aws-creds
-          echo "aws_access_key_id = ${{ secrets.AWS_ACCESS_KEY_ID }}" >> ${{ inputs.e2e_test_path }}/aws-creds
-          echo "aws_secret_access_key = ${{ secrets.AWS_SECRET_ACCESS_KEY }}" >> ${{ inputs.e2e_test_path }}/aws-creds
+          mkdir -p ${{ inputs.path }}
+          echo "[default]" > ${{ inputs.path }}/aws-creds
+          echo "aws_access_key_id = ${{ secrets.AWS_ACCESS_KEY_ID }}" >> ${{ inputs.path }}/aws-creds
+          echo "aws_secret_access_key = ${{ secrets.AWS_SECRET_ACCESS_KEY }}" >> ${{ inputs.path }}/aws-creds
 
       - name: Test
         run: |
-          up test run ${{ inputs.e2e_test_path }}/* --e2e
+          up test run ${{ inputs.path }}/* --e2e

@@ -14,7 +14,7 @@ on:
         type: string
         default: 'v2.0.2'
 
-      test_path:
+      path:
         description: 'Path to test files'
         required: false
         type: string
@@ -84,4 +84,4 @@ jobs:
 
       - name: Test
         run: |
-          up test run ${{ inputs.test_path }}/*
+          up test run ${{ inputs.path }}/*
