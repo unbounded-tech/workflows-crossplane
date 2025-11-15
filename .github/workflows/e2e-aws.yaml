@@ -14,11 +14,11 @@ on:
         type: string
         default: 'v2.0.2'
 
-      path:
-        description: 'Path to AWS credentials file'
+      pattern:
+        description: 'Test file pattern'
         required: false
         type: string
-        default: 'tests/e2e'
+        default: 'tests/e2e*'
 
     secrets:
       GH_PAT:
@@ -92,11 +92,11 @@ jobs:
 
       - name: Create AWS Credentials
         run: |
-          mkdir -p ${{ inputs.path }}
-          echo "[default]" > ${{ inputs.path }}/aws-creds
-          echo "aws_access_key_id = ${{ secrets.AWS_ACCESS_KEY_ID }}" >> ${{ inputs.path }}/aws-creds
-          echo "aws_secret_access_key = ${{ secrets.AWS_SECRET_ACCESS_KEY }}" >> ${{ inputs.path }}/aws-creds
+          mkdir -p ${{ inputs.credentials_path }}
+          echo "[default]" > ${{ inputs.credentials_path }}/aws-creds
+          echo "aws_access_key_id = ${{ secrets.AWS_ACCESS_KEY_ID }}" >> ${{ inputs.credentials_path }}/aws-creds
+          echo "aws_secret_access_key = ${{ secrets.AWS_SECRET_ACCESS_KEY }}" >> ${{ inputs.credentials_path }}/aws-creds
 
       - name: Test
         run: |
-          up test run ${{ inputs.path }}/* --e2e
+          up test run ${{ inputs.pattern }} --e2e
