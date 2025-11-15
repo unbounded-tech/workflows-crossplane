@@ -92,10 +92,16 @@ jobs:
 
       - name: Create AWS Credentials
         run: |
-          mkdir -p ${{ inputs.credentials_path }}
-          echo "[default]" > ${{ inputs.credentials_path }}/aws-creds
-          echo "aws_access_key_id = ${{ secrets.AWS_ACCESS_KEY_ID }}" >> ${{ inputs.credentials_path }}/aws-creds
-          echo "aws_secret_access_key = ${{ secrets.AWS_SECRET_ACCESS_KEY }}" >> ${{ inputs.credentials_path }}/aws-creds
+          mkdir -p ~/.aws
+          echo "[default]" > ~/.aws/credentials
+          echo "aws_access_key_id = ${{ secrets.AWS_ACCESS_KEY_ID }}" >> ~/.aws/credentials
+          echo "aws_secret_access_key = ${{ secrets.AWS_SECRET_ACCESS_KEY }}" >> ~/.aws/credentials
+          
+          for dir in ${{ inputs.pattern }}; do
+            if [ -d "$dir" ]; then
+              cp ~/.aws/credentials "$dir/aws-creds"
+            fi
+          done
 
       - name: Test
         run: |
