@@ -14,6 +14,12 @@ on:
         type: string
         default: 'v2.0.2'
 
+      test_path:
+        description: 'Path to test files'
+        required: false
+        type: string
+        default: 'tests'
+
     secrets:
       GH_PAT:
         description: 'Token for ghcr.io package write access'
@@ -78,4 +84,4 @@ jobs:
 
       - name: Test
         run: |
-          up test run tests/*
+          up test run ${{ inputs.test_path }}/*
