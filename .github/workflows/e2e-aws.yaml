@@ -20,6 +20,12 @@ on:
         type: string
         default: 'tests/e2e*'
 
+      cleanup_wait_time:
+        description: 'Time to wait for cleanup'
+        required: false
+        type: string
+        default: '5m'
+
     secrets:
       GH_PAT:
         description: 'Token for ghcr.io package write access'
@@ -105,4 +111,10 @@ jobs:
 
       - name: Test
         run: |
-          up test run ${{ inputs.pattern }} --e2e
+          up test run ${{ inputs.pattern }} --e2e --skip-control-plane-cleanup
+
+      - name: Wait for cleanup
+        run: |
+          kind get clusters
+          kind export kubeconfig --name configuration-aws-irsa-uptest
+          kubectl wait --for=delete --timeout=${{ inputs.cleanup_wait_time }} -n crossplane-system --all managed
