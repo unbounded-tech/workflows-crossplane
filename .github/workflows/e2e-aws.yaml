@@ -118,4 +118,5 @@ jobs:
         run: |
           CLUSTER_NAME=$(kind get clusters | head -n1)
           kind export kubeconfig --name "$CLUSTER_NAME"
-          kubectl wait --for=delete --timeout=${{ inputs.cleanup_wait_time }} -n crossplane-system --all managed
+          kubectl get managed -n default
+          kubectl wait --for=delete --timeout=${{ inputs.cleanup_wait_time }} -n default --all managed
