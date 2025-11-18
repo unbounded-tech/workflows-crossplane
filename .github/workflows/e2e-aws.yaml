@@ -105,7 +105,8 @@ jobs:
           
           for dir in ${{ inputs.pattern }}; do
             if [ -d "$dir" ]; then
-              cp ~/.aws/credentials "$dir/aws-creds"
+              mkdir -p "$dir/secrets"
+              cp ~/.aws/credentials "$dir/secrets/aws-creds"
             fi
           done
 
