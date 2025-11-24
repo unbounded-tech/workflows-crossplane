@@ -61,14 +61,14 @@ jobs:
             # It's a JSON array
             if echo "$examples" | jq -e '.[0] | type == "string"' >/dev/null 2>&1; then
               # Array of strings: convert to array of objects
-              processed=$(echo "$examples" | jq 'map({"example": .})')
+              processed=$(echo "$examples" | jq -c 'map({"example": .})')
             else
-              # Already array of objects: use as-is
-              processed="$examples"
+              # Already array of objects: use as-is (compact)
+              processed=$(echo "$examples" | jq -c '.')
             fi
           else
             # Single string: convert to array containing one object
-            processed=$(echo "$examples" | jq -R '[{"example": .}]')
+            processed=$(echo "$examples" | jq -Rc '[{"example": .}]')
           fi
           echo "examples=$processed" >> $GITHUB_OUTPUT
 
