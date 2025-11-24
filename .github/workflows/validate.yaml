@@ -55,9 +55,15 @@ jobs:
       - name: Process examples matrix
         id: process
         run: |
-          examples="${{ inputs.examples }}"
+          examples='${{ inputs.examples }}'
+
+          # Normalize: try to parse and compact as JSON first
+          if normalized=$(echo "$examples" | jq -c '.' 2>/dev/null); then
+            examples="$normalized"
+          fi
+
           # Check if input is valid JSON (array) or plain string
-          if echo "$examples" | jq -e 'type == "array"' >/dev/null 2>&1 2>/dev/null; then
+          if echo "$examples" | jq -e 'type == "array"' >/dev/null 2>&1; then
             # It's a JSON array
             if echo "$examples" | jq -e '.[0] | type == "string"' >/dev/null 2>&1; then
               # Array of strings: convert to array of objects
@@ -70,6 +76,7 @@ jobs:
             # Single string: convert to array containing one object
             processed=$(echo "$examples" | jq -Rc '[{"example": .}]')
           fi
+
           echo "examples=$processed" >> $GITHUB_OUTPUT
 
   validate:
