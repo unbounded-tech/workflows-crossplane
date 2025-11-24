@@ -10,10 +10,14 @@ A reusable workflow that validates Crossplane compositions and examples using th
 
 #### Inputs
 
-- `composition_path` (required): Path to your composition YAML file
-- `example_path` (required): Path to your example YAML file (claims or XRD instances)
-- `crossplane_version` (optional): Crossplane CLI version to install (default: `v2.0.2`)
+- `composition` (optional): Composition YAML filename (default: `composition.yaml`)
+- `examples` (required): Examples input. Accepts either a single example string or a JSON array. JSON arrays can be of strings (legacy) or objects (new format with observed_resources):
+  - Single example: `"examples/claim.yaml"`
+  - Array of strings: `["examples/claim.yaml", "examples/another.yaml"]`
+  - Array of objects: `[{"example": "examples/claim.yaml", "observed_resources": "examples/observed-resources/step-1/"}]`
 - `api_path` (required): Path to your API directory containing your XRD definitions
+- `crossplane_version` (optional): Crossplane CLI version to install (default: `v2.0.2`)
+- `error_on_missing_schemas` (optional): Whether to error on missing schemas during validation (default: `true`)
 - `ghcr_user` (optional): GitHub Container Registry username for pushing images
 
 #### Secrets
@@ -54,8 +58,7 @@ jobs:
   validate:
     uses: unbounded-tech/workflows-crossplane/.github/workflows/validate.yaml@main
     with:
-      composition_path: 'package/crossplane.yaml'
-      example_path: 'examples/claim.yaml'
+      examples: '[{"example": "examples/claim.yaml"}]'
       api_path: 'package'
     secrets:
       GH_PAT: ${{ secrets.GH_PAT }}
