@@ -15,7 +15,7 @@ on:
         default: 'composition.yaml'
 
       examples:
-        description: 'JSON array of example objects'
+        description: 'JSON array of example objects with path and optional observed_resources'
         required: true
         type: string
         default: '[]'
@@ -47,12 +47,38 @@ permissions:
   packages: read
 
 jobs:
+  setup:
+    runs-on: ubuntu-latest
+    outputs:
+      examples: ${{ steps.process.outputs.examples }}
+    steps:
+      - name: Process examples matrix
+        id: process
+        run: |
+          examples="${{ inputs.examples }}"
+          # Check if input is valid JSON (array) or plain string
+          if echo "$examples" | jq -e 'type == "array"' >/dev/null 2>&1 2>/dev/null; then
+            # It's a JSON array
+            if echo "$examples" | jq -e '.[0] | type == "string"' >/dev/null 2>&1; then
+              # Array of strings: convert to array of objects
+              processed=$(echo "$examples" | jq 'map({"example": .})')
+            else
+              # Already array of objects: use as-is
+              processed="$examples"
+            fi
+          else
+            # Single string: convert to array containing one object
+            processed=$(echo "$examples" | jq -R '[{"example": .}]')
+          fi
+          echo "examples=$processed" >> $GITHUB_OUTPUT
+
   validate:
+    needs: setup
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false # See all results
       matrix:
-        example: ${{ fromJSON(inputs.examples) }}
+        example: ${{ fromJSON(needs.setup.outputs.examples) }}
 
     steps:
       - name: Checkout
@@ -106,13 +132,18 @@ jobs:
 
       - name: Render Example
         run: |
+          observed_flag=""
+          if [ -n "${{ matrix.example.observed_resources }}" ]; then
+            observed_flag="--observed-resources=${{ matrix.example.observed_resources }}"
+          fi
           up composition render \
             ${{ inputs.api_path }}/${{ inputs.composition }} \
-            ${{ matrix.example }}
+            ${{ matrix.example.example }} \
+            $observed_flag
 
       - name: Validate Example
         run: |
-          ./crossplane beta validate ${{ matrix.example }} ${{ inputs.api_path }}
+          ./crossplane beta validate ${{ matrix.example.example }} ${{ inputs.api_path }}
 
       - name: Validate Rendered Example
         run: |
@@ -120,8 +151,13 @@ jobs:
           if [ "${{ inputs.error_on_missing_schemas }}" = "true" ]; then
             flag="--error-on-missing-schemas"
           fi
+          observed_flag=""
+          if [ -n "${{ matrix.example.observed_resources }}" ]; then
+            observed_flag="--observed-resources=${{ matrix.example.observed_resources }}"
+          fi
           up composition render \
             ${{ inputs.api_path }}/${{ inputs.composition }} \
-            ${{ matrix.example }} \
+            ${{ matrix.example.example }} \
             --include-full-xr --quiet \
+            $observed_flag \
           | ./crossplane beta validate ${{ inputs.api_path }} $flag -
