@@ -1,4 +1,4 @@
-name: (Deprecated) e2e-aws - use e2e
+name: e2e
 
 on:
   workflow_call:
@@ -32,6 +32,12 @@ on:
         type: number
         default: 10
 
+      aws:
+        description: 'Enable AWS credentials setup'
+        required: false
+        type: boolean
+        default: false
+
     secrets:
       GH_PAT:
         description: 'Token for ghcr.io package write access'
@@ -39,11 +45,15 @@ on:
 
       AWS_ACCESS_KEY_ID:
         description: 'AWS Access Key ID for E2E tests'
-        required: true
+        required: false
 
       AWS_SECRET_ACCESS_KEY:
         description: 'AWS Secret Access Key for E2E tests'
-        required: true
+        required: false
+
+      AWS_SESSION_TOKEN:
+        description: 'AWS Session Token for E2E tests (required for OIDC/assumed roles)'
+        required: false
 
 permissions:
   contents: read
@@ -57,7 +67,7 @@ jobs:
         uses: actions/checkout@v6
 
       - name: Cache upbound + crossplane
-        uses: actions/cache@v5
+        uses: actions/cache@v4
         with:
           path: |
             ~/.crossplane/cache
@@ -103,16 +113,33 @@ jobs:
           skip-login-check: true
 
       - name: Create AWS Credentials
+        if: inputs.aws
         run: |
           mkdir -p ~/.aws
           echo "[default]" > ~/.aws/credentials
           echo "aws_access_key_id = ${{ secrets.AWS_ACCESS_KEY_ID }}" >> ~/.aws/credentials
           echo "aws_secret_access_key = ${{ secrets.AWS_SECRET_ACCESS_KEY }}" >> ~/.aws/credentials
-          
+          if [ -n "${{ secrets.AWS_SESSION_TOKEN }}" ]; then
+            echo "aws_session_token = ${{ secrets.AWS_SESSION_TOKEN }}" >> ~/.aws/credentials
+          fi
+
           for dir in ${{ inputs.pattern }}; do
             if [ -d "$dir" ]; then
               mkdir -p "$dir/secrets"
               cp ~/.aws/credentials "$dir/secrets/aws-creds"
+            fi
+          done
+
+      - name: Create ENV secrets
+        run: |
+          for dir in ${{ inputs.pattern }}; do
+            if [ -d "$dir" ]; then
+              mkdir -p "$dir/secrets/env"
+              env | while IFS='=' read -r name value; do
+                if [ -n "$name" ]; then
+                  echo "$value" > "$dir/secrets/env/$name"
+                fi
+              done
             fi
           done
 

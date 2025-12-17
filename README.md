@@ -116,6 +116,159 @@ jobs:
       GH_PAT: ${{ secrets.GH_PAT }}
 ```
 
+### E2E (`e2e.yaml`)
+
+A reusable workflow that runs end-to-end tests for Crossplane compositions using Kind clusters and real cloud providers.
+
+#### Inputs
+
+- `crossplane_version` (optional): Crossplane CLI version to install (default: `v2.0.2`)
+- `ghcr_user` (optional): GitHub Container Registry username for pulling/pushing images
+- `pattern` (optional): Test file pattern (default: `tests/e2e*`)
+- `timeout-minutes` (optional): Timeout in minutes for the e2e test step (default: `20`)
+- `cleanup-timeout-minutes` (optional): Timeout in minutes for the cleanup step (default: `10`)
+- `aws` (optional): Enable AWS credentials setup (default: `false`)
+
+#### Secrets
+
+- `GH_PAT` (optional): Personal access token for GitHub Container Registry write access (required if `ghcr_user` is provided)
+- `AWS_ACCESS_KEY_ID` (optional): AWS Access Key ID for E2E tests (required if `aws` is `true`)
+- `AWS_SECRET_ACCESS_KEY` (optional): AWS Secret Access Key for E2E tests (required if `aws` is `true`)
+- `AWS_SESSION_TOKEN` (optional): AWS Session Token for E2E tests (required for OIDC/assumed roles)
+
+#### Permissions
+
+Requires the following permissions in the calling workflow:
+- `packages: read` (for GHCR access)
+- `contents: read` (for checking out code)
+- `id-token: write` (for OIDC authentication with AWS, if using assumable roles)
+
+#### What It Does
+
+1. Caches Upbound and Crossplane CLI installations
+2. Authenticates with Upbound (without logging into registry)
+3. Installs Crossplane CLI
+4. Logs into GitHub Container Registry
+5. Builds the project using `up` (Upbound CLI)
+6. Creates AWS credentials file (if `aws: true`)
+7. Creates ENV secrets for each environment variable
+8. Runs e2e tests using `up test run` with `--e2e` flag
+9. Waits for managed resources to be cleaned up
+
+#### Usage
+
+Basic usage without AWS:
+
+```yaml
+name: E2E Tests
+
+on:
+  push:
+    branches: [ main ]
+
+jobs:
+  e2e:
+    uses: unbounded-tech/workflows-crossplane/.github/workflows/e2e.yaml@main
+    secrets:
+      GH_PAT: ${{ secrets.GH_PAT }}
+```
+
+With AWS credentials using OIDC assumable role (recommended):
+
+```yaml
+name: E2E Tests
+
+on:
+  push:
+    branches: [ main ]
+
+permissions:
+  id-token: write
+  contents: read
+  packages: read
+
+jobs:
+  aws-credentials:
+    runs-on: ubuntu-latest
+    outputs:
+      aws_access_key_id: ${{ steps.creds.outputs.aws-access-key-id }}
+      aws_secret_access_key: ${{ steps.creds.outputs.aws-secret-access-key }}
+      aws_session_token: ${{ steps.creds.outputs.aws-session-token }}
+    steps:
+      - name: Configure AWS Credentials
+        id: creds
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::123456789012:role/github-actions-role
+          aws-region: us-east-1
+          output-credentials: true
+
+  e2e:
+    needs: aws-credentials
+    uses: unbounded-tech/workflows-crossplane/.github/workflows/e2e.yaml@main
+    with:
+      aws: true
+    secrets:
+      GH_PAT: ${{ secrets.GH_PAT }}
+      AWS_ACCESS_KEY_ID: ${{ needs.aws-credentials.outputs.aws_access_key_id }}
+      AWS_SECRET_ACCESS_KEY: ${{ needs.aws-credentials.outputs.aws_secret_access_key }}
+      AWS_SESSION_TOKEN: ${{ needs.aws-credentials.outputs.aws_session_token }}
+```
+
+With static AWS credentials (if OIDC is not available):
+
+```yaml
+name: E2E Tests
+
+on:
+  push:
+    branches: [ main ]
+
+jobs:
+  e2e:
+    uses: unbounded-tech/workflows-crossplane/.github/workflows/e2e.yaml@main
+    with:
+      aws: true
+    secrets:
+      GH_PAT: ${{ secrets.GH_PAT }}
+      AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+```
+
+#### Migrating from `e2e-aws.yaml`
+
+The `e2e-aws.yaml` workflow is deprecated. To migrate to `e2e.yaml`, add `aws: true` to your inputs:
+
+**Before:**
+```yaml
+jobs:
+  e2e:
+    uses: unbounded-tech/workflows-crossplane/.github/workflows/e2e-aws.yaml@main
+    secrets:
+      GH_PAT: ${{ secrets.GH_PAT }}
+      AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+```
+
+**After:**
+```yaml
+jobs:
+  e2e:
+    uses: unbounded-tech/workflows-crossplane/.github/workflows/e2e.yaml@main
+    with:
+      aws: true
+    secrets:
+      GH_PAT: ${{ secrets.GH_PAT }}
+      AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+```
+
+### E2E AWS (`e2e-aws.yaml`) - Deprecated
+
+> **Deprecated:** Use `e2e.yaml` with `aws: true` instead. See migration guide above.
+
+This workflow is maintained for backwards compatibility only and will be removed in a future release.
+
 ### Publish (`publish.yaml`)
 
 A reusable workflow that publishes Crossplane packages to a registry using the Upbound CLI.

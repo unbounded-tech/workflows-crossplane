@@ -1,4 +1,4 @@
-name: On Push to Main, Version and Tag For Release
+name: on-push-main-version-and-tag
 on:
   push:
     branches:

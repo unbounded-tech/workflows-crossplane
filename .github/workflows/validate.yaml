@@ -1,4 +1,4 @@
-name: quality
+name: validate
 
 on:
   workflow_call:
