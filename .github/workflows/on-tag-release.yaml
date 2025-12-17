@@ -1,4 +1,4 @@
-name: On Tag, Trigger GitHub Release
+name: on-tag-release
 
 on:
   push:
