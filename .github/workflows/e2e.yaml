@@ -130,18 +130,18 @@ jobs:
             fi
           done
 
-      - name: Create ENV secrets
-        run: |
-          for dir in ${{ inputs.pattern }}; do
-            if [ -d "$dir" ]; then
-              mkdir -p "$dir/secrets/env"
-              env | while IFS='=' read -r name value; do
-                if [ -n "$name" ]; then
-                  echo "$value" > "$dir/secrets/env/$name"
-                fi
-              done
-            fi
-          done
+      # - name: Create ENV secrets
+      #   run: |
+      #     for dir in ${{ inputs.pattern }}; do
+      #       if [ -d "$dir" ]; then
+      #         mkdir -p "$dir/secrets/env"
+      #         env | while IFS='=' read -r name value; do
+      #           if [ -n "$name" ]; then
+      #             echo "$value" > "$dir/secrets/env/$name"
+      #           fi
+      #         done
+      #       fi
+      #     done
 
       - name: Test
         timeout-minutes: ${{ inputs.timeout-minutes }}
