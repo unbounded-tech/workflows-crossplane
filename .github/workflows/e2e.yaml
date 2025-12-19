@@ -150,8 +150,12 @@ jobs:
           up test run ${{ inputs.pattern }} --e2e --skip-control-plane-cleanup
 
       - name: Debug failed resources
-        if: failure()
+        if: always()
         run: |
+          if [ "${{ steps.test.outcome }}" = "success" ]; then
+            echo "Test passed, skipping debug output"
+            exit 0
+          fi
           CLUSTER_NAME=$(kind get clusters | head -n1)
           kind export kubeconfig --name "$CLUSTER_NAME"
           echo "=== Namespace Events ==="
@@ -177,8 +181,12 @@ jobs:
           done
 
       - name: Force delete managed resources
-        if: failure()
+        if: always()
         run: |
+          if [ "${{ steps.test.outcome }}" = "success" ]; then
+            echo "Test passed, skipping force delete"
+            exit 0
+          fi
           CLUSTER_NAME=$(kind get clusters | head -n1)
           kind export kubeconfig --name "$CLUSTER_NAME"
           echo "=== Deleting all managed resources ==="
