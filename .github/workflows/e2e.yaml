@@ -162,18 +162,14 @@ jobs:
           kubectl get managed -n default
           echo ""
           echo "=== Resources with False conditions ==="
-          kubectl get managed -n default -o json | jq -r '
-            .items[] |
-            select(.status.conditions[]? | select(.status == "False")) |
-            "\(.kind) \(.metadata.name)"
-          ' | while read -r kind name; do
-            if [ -n "$kind" ] && [ -n "$name" ]; then
+          kubectl get managed -n default | grep False | awk '{print $1}' | while read -r resource; do
+            if [ -n "$resource" ]; then
               echo ""
-              echo "=== $kind/$name YAML ==="
-              kubectl get -n default "$kind" "$name" -o yaml || true
+              echo "=== $resource YAML ==="
+              kubectl get "$resource" -o yaml || true
               echo ""
-              echo "=== $kind/$name Describe ==="
-              kubectl describe -n default "$kind" "$name" || true
+              echo "=== $resource Describe ==="
+              kubectl describe "$resource" || true
             fi
           done
 
@@ -187,10 +183,10 @@ jobs:
           CLUSTER_NAME=$(kind get clusters | head -n1)
           kind export kubeconfig --name "$CLUSTER_NAME"
           echo "=== Deleting all managed resources ==="
-          kubectl get managed -n default -o json | jq -r '.items[] | "\(.kind) \(.metadata.name)"' | while read -r kind name; do
-            if [ -n "$kind" ] && [ -n "$name" ]; then
-              echo "Deleting $kind/$name"
-              kubectl delete "$kind" "$name" --wait=false || true
+          kubectl get managed -n default --no-headers | awk '{print $1}' | while read -r resource; do
+            if [ -n "$resource" ]; then
+              echo "Deleting $resource"
+              kubectl delete "$resource" --wait=false || true
             fi
           done
 
