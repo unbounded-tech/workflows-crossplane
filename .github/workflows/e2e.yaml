@@ -158,9 +158,6 @@ jobs:
           fi
           CLUSTER_NAME=$(kind get clusters | head -n1)
           kind export kubeconfig --name "$CLUSTER_NAME"
-          echo "=== Namespace Events ==="
-          kubectl get events -n default --sort-by='.lastTimestamp'
-          echo ""
           echo "=== All Managed Resources ==="
           kubectl get managed -n default
           echo ""
@@ -173,10 +170,10 @@ jobs:
             if [ -n "$kind" ] && [ -n "$name" ]; then
               echo ""
               echo "=== $kind/$name YAML ==="
-              kubectl get "$kind" "$name" -o yaml || true
+              kubectl get -n default "$kind" "$name" -o yaml || true
               echo ""
               echo "=== $kind/$name Describe ==="
-              kubectl describe "$kind" "$name" || true
+              kubectl describe -n default "$kind" "$name" || true
             fi
           done
 
