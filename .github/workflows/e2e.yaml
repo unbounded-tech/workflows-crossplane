@@ -38,6 +38,16 @@ on:
         type: boolean
         default: false
 
+      debug-example-path:
+        description: 'Path to example YAML file to auto-discover root resource type for debugging'
+        required: false
+        type: string
+
+      debug-resource-types:
+        description: 'Comma-separated list of additional resource types to debug (format: kind.apiVersion, e.g., IdentityCenter.aws.platform.upbound.io)'
+        required: false
+        type: string
+
     secrets:
       GH_PAT:
         description: 'Token for ghcr.io package write access'
