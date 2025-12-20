@@ -183,6 +183,58 @@ jobs:
             fi
           done
 
+          # Collect debug resource types
+          DEBUG_TYPES=""
+
+          # Auto-discover from example file if provided
+          if [ -n "${{ inputs.debug-example-path }}" ] && [ -f "${{ inputs.debug-example-path }}" ]; then
+            echo ""
+            echo "=== Auto-discovering resource type from ${{ inputs.debug-example-path }} ==="
+            EXAMPLE_KIND=$(grep -E "^kind:" "${{ inputs.debug-example-path }}" | head -n1 | awk '{print $2}')
+            EXAMPLE_API=$(grep -E "^apiVersion:" "${{ inputs.debug-example-path }}" | head -n1 | awk '{print $2}')
+            if [ -n "$EXAMPLE_KIND" ] && [ -n "$EXAMPLE_API" ]; then
+              # Convert apiVersion (e.g., aws.platform.upbound.io/v1alpha1) to group (aws.platform.upbound.io)
+              EXAMPLE_GROUP=$(echo "$EXAMPLE_API" | cut -d'/' -f1)
+              DEBUG_TYPES="${EXAMPLE_KIND}.${EXAMPLE_GROUP}"
+              echo "Discovered: $DEBUG_TYPES"
+            fi
+          fi
+
+          # Add user-provided debug resource types
+          if [ -n "${{ inputs.debug-resource-types }}" ]; then
+            if [ -n "$DEBUG_TYPES" ]; then
+              DEBUG_TYPES="${DEBUG_TYPES},${{ inputs.debug-resource-types }}"
+            else
+              DEBUG_TYPES="${{ inputs.debug-resource-types }}"
+            fi
+          fi
+
+          # Debug each resource type
+          if [ -n "$DEBUG_TYPES" ]; then
+            echo ""
+            echo "=== Debugging composite resources ==="
+            echo "$DEBUG_TYPES" | tr ',' '\n' | while read -r resource_type; do
+              if [ -n "$resource_type" ]; then
+                echo ""
+                echo "=== Checking $resource_type in default namespace ==="
+                if kubectl get "$resource_type" -n default --no-headers 2>/dev/null | head -n1 | grep -q .; then
+                  kubectl get "$resource_type" -n default --no-headers | awk '{print $1}' | while read -r name; do
+                    if [ -n "$name" ]; then
+                      echo ""
+                      echo "=== $resource_type/$name YAML ==="
+                      kubectl get "$resource_type" "$name" -n default -o yaml || true
+                      echo ""
+                      echo "=== $resource_type/$name Describe ==="
+                      kubectl describe "$resource_type" "$name" -n default || true
+                    fi
+                  done
+                else
+                  echo "No $resource_type resources found in default namespace"
+                fi
+              fi
+            done
+          fi
+
       - name: Force delete managed resources
         if: always()
         run: |
@@ -199,6 +251,44 @@ jobs:
               kubectl delete "$resource" --wait=false || true
             fi
           done
+
+          # Collect debug resource types for deletion
+          DEBUG_TYPES=""
+
+          # Auto-discover from example file if provided
+          if [ -n "${{ inputs.debug-example-path }}" ] && [ -f "${{ inputs.debug-example-path }}" ]; then
+            EXAMPLE_KIND=$(grep -E "^kind:" "${{ inputs.debug-example-path }}" | head -n1 | awk '{print $2}')
+            EXAMPLE_API=$(grep -E "^apiVersion:" "${{ inputs.debug-example-path }}" | head -n1 | awk '{print $2}')
+            if [ -n "$EXAMPLE_KIND" ] && [ -n "$EXAMPLE_API" ]; then
+              EXAMPLE_GROUP=$(echo "$EXAMPLE_API" | cut -d'/' -f1)
+              DEBUG_TYPES="${EXAMPLE_KIND}.${EXAMPLE_GROUP}"
+            fi
+          fi
+
+          # Add user-provided debug resource types
+          if [ -n "${{ inputs.debug-resource-types }}" ]; then
+            if [ -n "$DEBUG_TYPES" ]; then
+              DEBUG_TYPES="${DEBUG_TYPES},${{ inputs.debug-resource-types }}"
+            else
+              DEBUG_TYPES="${{ inputs.debug-resource-types }}"
+            fi
+          fi
+
+          # Delete composite resources
+          if [ -n "$DEBUG_TYPES" ]; then
+            echo ""
+            echo "=== Deleting composite resources ==="
+            echo "$DEBUG_TYPES" | tr ',' '\n' | while read -r resource_type; do
+              if [ -n "$resource_type" ]; then
+                kubectl get "$resource_type" -n default --no-headers 2>/dev/null | awk '{print $1}' | while read -r name; do
+                  if [ -n "$name" ]; then
+                    echo "Deleting $resource_type/$name"
+                    kubectl delete "$resource_type" "$name" -n default --wait=false || true
+                  fi
+                done
+              fi
+            done
+          fi
 
       - name: Wait for cleanup
         if: always()
