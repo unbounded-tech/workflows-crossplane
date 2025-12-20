@@ -162,17 +162,19 @@ jobs:
       - name: Discover debug resource types
         if: always()
         run: |
+          ROOT_RESOURCE_TYPE=""
           DEBUG_TYPES=""
 
-          # Auto-discover from example file if provided
+          # Auto-discover root resource type from example file
           if [ -n "${{ inputs.debug-example-path }}" ] && [ -f "${{ inputs.debug-example-path }}" ]; then
             EXAMPLE_KIND=$(yq '.kind' "${{ inputs.debug-example-path }}")
             EXAMPLE_API=$(yq '.apiVersion' "${{ inputs.debug-example-path }}")
             if [ -n "$EXAMPLE_KIND" ] && [ "$EXAMPLE_KIND" != "null" ] && [ -n "$EXAMPLE_API" ] && [ "$EXAMPLE_API" != "null" ]; then
               # Convert apiVersion (e.g., aws.platform.upbound.io/v1alpha1) to group (aws.platform.upbound.io)
               EXAMPLE_GROUP=$(echo "$EXAMPLE_API" | cut -d'/' -f1)
-              DEBUG_TYPES="${EXAMPLE_KIND}.${EXAMPLE_GROUP}"
-              echo "Discovered from example: $DEBUG_TYPES"
+              ROOT_RESOURCE_TYPE="${EXAMPLE_KIND}.${EXAMPLE_GROUP}"
+              DEBUG_TYPES="$ROOT_RESOURCE_TYPE"
+              echo "Discovered root resource type: $ROOT_RESOURCE_TYPE"
             fi
           fi
 
@@ -185,6 +187,7 @@ jobs:
             fi
           fi
 
+          echo "ROOT_RESOURCE_TYPE=$ROOT_RESOURCE_TYPE" >> "$GITHUB_ENV"
           echo "DEBUG_TYPES=$DEBUG_TYPES" >> "$GITHUB_ENV"
           echo "Debug resource types: $DEBUG_TYPES"
 
@@ -250,93 +253,31 @@ jobs:
             done
           fi
 
-      - name: Force delete managed resources
+      - name: Force delete root resource
         if: always()
         run: |
           if [ "${{ steps.test.outcome }}" = "success" ]; then
             echo "Test passed, skipping force delete"
             exit 0
           fi
+          if [ -z "$ROOT_RESOURCE_TYPE" ]; then
+            echo "No root resource type discovered, skipping"
+            exit 0
+          fi
           CLUSTER_NAME=$(kind get clusters | head -n1)
           kind export kubeconfig --name "$CLUSTER_NAME"
 
-          # Delete composite resources first (they own managed resources)
-          if [ -n "$DEBUG_TYPES" ]; then
-            echo "=== Deleting composite resources ==="
-            echo "$DEBUG_TYPES" | tr ',' '\n' | while read -r resource_type; do
-              if [ -n "$resource_type" ]; then
-                kubectl get "$resource_type" -n default --no-headers 2>/dev/null | awk '{print $1}' | while read -r name; do
-                  if [ -n "$name" ]; then
-                    echo "Deleting $resource_type/$name"
-                    kubectl delete "$resource_type" "$name" -n default --wait=false || true
-                  fi
-                done
-              fi
-            done
-          fi
-
-          # Loop to delete managed resources until none remain
-          MAX_ITERATIONS=20
-          ITERATION=0
-          while true; do
-            ITERATION=$((ITERATION + 1))
-            echo ""
-            echo "=== Delete iteration $ITERATION ==="
-
-            # Get current managed resources
-            RESOURCES=$(kubectl get managed -n default --no-headers 2>/dev/null | awk '{print $1}')
-            if [ -z "$RESOURCES" ]; then
-              echo "No managed resources remaining"
-              break
-            fi
-
-            if [ "$ITERATION" -gt "$MAX_ITERATIONS" ]; then
-              echo "Max iterations reached, some resources may remain"
-              kubectl get managed -n default
-              break
-            fi
-
-            # Count resources
-            RESOURCE_COUNT=$(echo "$RESOURCES" | wc -l | tr -d ' ')
-            echo "Found $RESOURCE_COUNT managed resources"
-
-            # Try to delete each resource, collect successful deletions
-            DELETED_FILE="/tmp/deleted_resources_$$_$ITERATION"
-            rm -f "$DELETED_FILE"
-            echo "$RESOURCES" | while read -r resource; do
-              if [ -n "$resource" ]; then
-                if kubectl delete "$resource" --wait=false 2>/dev/null; then
-                  echo "Deleted $resource"
-                  echo "$resource" >> "$DELETED_FILE"
-                else
-                  echo "Skipped $resource (in-use or not found)"
-                fi
-              fi
-            done
-
-            # Wait for each successfully deleted resource
-            if [ -f "$DELETED_FILE" ]; then
-              echo ""
-              echo "Waiting for deletions to complete..."
-              while read -r resource; do
-                if [ -n "$resource" ]; then
-                  # Check if resource still exists before waiting
-                  if kubectl get "$resource" --no-headers 2>/dev/null | grep -q .; then
-                    echo "Waiting for $resource..."
-                    kubectl wait --for=delete "$resource" --timeout=60s 2>/dev/null || true
-                  else
-                    echo "$resource already gone"
-                  fi
-                fi
-              done < "$DELETED_FILE"
-              rm -f "$DELETED_FILE"
-            else
-              echo "No deletions accepted this iteration, waiting..."
-              sleep 10
+          # Delete root composite resource (cascade will delete children)
+          echo "=== Deleting root resource ($ROOT_RESOURCE_TYPE) ==="
+          kubectl get "$ROOT_RESOURCE_TYPE" -n default --no-headers 2>/dev/null | awk '{print $1}' | while read -r name; do
+            if [ -n "$name" ]; then
+              echo "Deleting $ROOT_RESOURCE_TYPE/$name"
+              kubectl delete "$ROOT_RESOURCE_TYPE" "$name" -n default || true
             fi
           done
 
       - name: Wait for cleanup
+        if: always()
         run: |
           CLUSTER_NAME=$(kind get clusters | head -n1)
           kind export kubeconfig --name "$CLUSTER_NAME"
