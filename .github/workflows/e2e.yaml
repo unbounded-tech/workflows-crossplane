@@ -3,7 +3,7 @@ name: e2e
 on:
   workflow_call:
     inputs:
-      ghcr_user:
+      ghcr-user:
         description: 'ghcr user'
         required: false
         type: string
@@ -47,6 +47,18 @@ on:
         description: 'JSON array of resource types to print debug information for when tests fail (e.g., ["IdentityCenter.aws.platform.upbound.io", "Organization.aws.platform.upbound.io"])'
         required: false
         type: string
+
+      debug-get-yaml:
+        description: 'Show kubectl get -o yaml output for failed resources'
+        required: false
+        type: boolean
+        default: false
+
+      debug-describe:
+        description: 'Show kubectl describe output for failed resources'
+        required: false
+        type: boolean
+        default: true
 
     secrets:
       GH_PAT:
@@ -94,20 +106,20 @@ jobs:
           curl -sL https://raw.githubusercontent.com/crossplane/crossplane/master/install.sh \
             | XP_VERSION=${{ inputs.crossplane_version }} sh
 
-      - name: check for GH_PAT if ghcr_user is set
-        if: inputs.ghcr_user
+      - name: check for GH_PAT if ghcr-user is set
+        if: inputs.ghcr-user
         run: |
           if [ -z "${{ secrets.GH_PAT }}" ]; then
-            echo "GH_PAT secret must be set if ghcr_user is set"
+            echo "GH_PAT secret must be set if ghcr-user is set"
             exit 1
           fi
 
       - name: Docker login to GHCR
-        if: inputs.ghcr_user
+        if: inputs.ghcr-user
         uses: docker/login-action@v3.6.0
         with:
           registry: ghcr.io
-          username: ${{ inputs.ghcr_user }}
+          username: ${{ inputs.ghcr-user }}
           password: ${{ secrets.GH_PAT }}
 
       - name: Docker login to GHCR
@@ -121,6 +133,18 @@ jobs:
         uses: upbound/action-up-project@v1.1.2
         with:
           skip-login-check: true
+
+      - name: Check for AWS credentials if aws is enabled
+        if: inputs.aws
+        run: |
+          if [ -z "${{ secrets.AWS_ACCESS_KEY_ID }}" ]; then
+            echo "AWS_ACCESS_KEY_ID secret must be set if aws is enabled"
+            exit 1
+          fi
+          if [ -z "${{ secrets.AWS_SECRET_ACCESS_KEY }}" ]; then
+            echo "AWS_SECRET_ACCESS_KEY secret must be set if aws is enabled"
+            exit 1
+          fi
 
       - name: Create AWS Credentials
         if: inputs.aws
@@ -223,12 +247,16 @@ jobs:
           echo "=== Resources with False or Unknown (-) conditions ==="
           kubectl get managed -n default | awk 'NR>1 && ($2 == "False" || $2 == "-" || $3 == "False" || $3 == "-") {print $1}' | while read -r resource; do
             if [ -n "$resource" ]; then
-              echo ""
-              echo "=== $resource YAML ==="
-              kubectl get "$resource" -o yaml || true
-              echo ""
-              echo "=== $resource Describe ==="
-              kubectl describe "$resource" || true
+              if [ "${{ inputs.debug-get-yaml }}" = "true" ]; then
+                echo ""
+                echo "=== $resource YAML ==="
+                kubectl get "$resource" -o yaml || true
+              fi
+              if [ "${{ inputs.debug-describe }}" = "true" ]; then
+                echo ""
+                echo "=== $resource Describe ==="
+                kubectl describe "$resource" || true
+              fi
             fi
           done
 
@@ -243,12 +271,16 @@ jobs:
                 if kubectl get "$resource_type" -n default --no-headers 2>/dev/null | head -n1 | grep -q .; then
                   kubectl get "$resource_type" -n default --no-headers | awk '{print $1}' | while read -r name; do
                     if [ -n "$name" ]; then
-                      echo ""
-                      echo "=== $resource_type/$name YAML ==="
-                      kubectl get "$resource_type" "$name" -n default -o yaml || true
-                      echo ""
-                      echo "=== $resource_type/$name Describe ==="
-                      kubectl describe "$resource_type" "$name" -n default || true
+                      if [ "${{ inputs.debug-get-yaml }}" = "true" ]; then
+                        echo ""
+                        echo "=== $resource_type/$name YAML ==="
+                        kubectl get "$resource_type" "$name" -n default -o yaml || true
+                      fi
+                      if [ "${{ inputs.debug-describe }}" = "true" ]; then
+                        echo ""
+                        echo "=== $resource_type/$name Describe ==="
+                        kubectl describe "$resource_type" "$name" -n default || true
+                      fi
                     fi
                   done
                 else
