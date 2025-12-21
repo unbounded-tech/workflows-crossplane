@@ -38,6 +38,16 @@ on:
         type: boolean
         default: false
 
+      debug-example-path:
+        description: 'Path to example YAML file to auto-discover root resource type for debugging'
+        required: false
+        type: string
+
+      debug-resource-types:
+        description: 'JSON array of additional resource types to debug (e.g., ["IdentityCenter.aws.platform.upbound.io", "Organization.aws.platform.upbound.io"])'
+        required: false
+        type: string
+
     secrets:
       GH_PAT:
         description: 'Token for ghcr.io package write access'
@@ -144,11 +154,135 @@ jobs:
       #     done
 
       - name: Test
+        id: test
         timeout-minutes: ${{ inputs.timeout-minutes }}
         run: |
           up test run ${{ inputs.pattern }} --e2e --skip-control-plane-cleanup
 
+      - name: Discover debug resource types
+        if: always()
+        run: |
+          ROOT_RESOURCE_TYPE=""
+          DEBUG_TYPES=""
+
+          # Auto-discover root resource type from example file
+          if [ -n "${{ inputs.debug-example-path }}" ] && [ -f "${{ inputs.debug-example-path }}" ]; then
+            EXAMPLE_KIND=$(yq '.kind' "${{ inputs.debug-example-path }}")
+            EXAMPLE_API=$(yq '.apiVersion' "${{ inputs.debug-example-path }}")
+            if [ -n "$EXAMPLE_KIND" ] && [ "$EXAMPLE_KIND" != "null" ] && [ -n "$EXAMPLE_API" ] && [ "$EXAMPLE_API" != "null" ]; then
+              # Convert apiVersion (e.g., aws.platform.upbound.io/v1alpha1) to group (aws.platform.upbound.io)
+              EXAMPLE_GROUP=$(echo "$EXAMPLE_API" | cut -d'/' -f1)
+              ROOT_RESOURCE_TYPE="${EXAMPLE_KIND}.${EXAMPLE_GROUP}"
+              DEBUG_TYPES="$ROOT_RESOURCE_TYPE"
+              echo "Discovered root resource type: $ROOT_RESOURCE_TYPE"
+            fi
+          fi
+
+          # Add user-provided debug resource types (expects JSON array)
+          USER_TYPES='${{ inputs.debug-resource-types }}'
+          if [ -n "$USER_TYPES" ]; then
+            # Parse JSON array and convert to comma-separated string
+            PARSED_TYPES=$(echo "$USER_TYPES" | jq -r 'if type == "array" then .[] else empty end' 2>/dev/null | paste -sd,)
+            if [ -n "$PARSED_TYPES" ]; then
+              if [ -n "$DEBUG_TYPES" ]; then
+                DEBUG_TYPES="${DEBUG_TYPES},${PARSED_TYPES}"
+              else
+                DEBUG_TYPES="$PARSED_TYPES"
+              fi
+            fi
+          fi
+
+          echo "ROOT_RESOURCE_TYPE=$ROOT_RESOURCE_TYPE" >> "$GITHUB_ENV"
+          echo "DEBUG_TYPES=$DEBUG_TYPES" >> "$GITHUB_ENV"
+          echo "Debug resource types: $DEBUG_TYPES"
+
+      - name: Debug namespace events
+        if: always()
+        run: |
+          if [ "${{ steps.test.outcome }}" = "success" ]; then
+            echo "Test passed, skipping debug output"
+            exit 0
+          fi
+          CLUSTER_NAME=$(kind get clusters | head -n1)
+          kind export kubeconfig --name "$CLUSTER_NAME"
+          echo "=== Namespace Events ==="
+          kubectl get events -n default --sort-by='.lastTimestamp'
+
+      - name: Debug failed resources
+        if: always()
+        run: |
+          if [ "${{ steps.test.outcome }}" = "success" ]; then
+            echo "Test passed, skipping debug output"
+            exit 0
+          fi
+          CLUSTER_NAME=$(kind get clusters | head -n1)
+          kind export kubeconfig --name "$CLUSTER_NAME"
+          echo "=== All Managed Resources ==="
+          kubectl get managed -n default
+          echo ""
+          echo "=== Resources with False conditions ==="
+          kubectl get managed -n default | grep False | awk '{print $1}' | while read -r resource; do
+            if [ -n "$resource" ]; then
+              echo ""
+              echo "=== $resource YAML ==="
+              kubectl get "$resource" -o yaml || true
+              echo ""
+              echo "=== $resource Describe ==="
+              kubectl describe "$resource" || true
+            fi
+          done
+
+          # Debug each resource type
+          if [ -n "$DEBUG_TYPES" ]; then
+            echo ""
+            echo "=== Debugging composite resources ==="
+            echo "$DEBUG_TYPES" | tr ',' '\n' | while read -r resource_type; do
+              if [ -n "$resource_type" ]; then
+                echo ""
+                echo "=== Checking $resource_type in default namespace ==="
+                if kubectl get "$resource_type" -n default --no-headers 2>/dev/null | head -n1 | grep -q .; then
+                  kubectl get "$resource_type" -n default --no-headers | awk '{print $1}' | while read -r name; do
+                    if [ -n "$name" ]; then
+                      echo ""
+                      echo "=== $resource_type/$name YAML ==="
+                      kubectl get "$resource_type" "$name" -n default -o yaml || true
+                      echo ""
+                      echo "=== $resource_type/$name Describe ==="
+                      kubectl describe "$resource_type" "$name" -n default || true
+                    fi
+                  done
+                else
+                  echo "No $resource_type resources found in default namespace"
+                fi
+              fi
+            done
+          fi
+
+      - name: Force delete root resource
+        if: always()
+        run: |
+          if [ "${{ steps.test.outcome }}" = "success" ]; then
+            echo "Test passed, skipping force delete"
+            exit 0
+          fi
+          if [ -z "$ROOT_RESOURCE_TYPE" ]; then
+            echo "No root resource type discovered, skipping"
+            exit 0
+          fi
+          CLUSTER_NAME=$(kind get clusters | head -n1)
+          kind export kubeconfig --name "$CLUSTER_NAME"
+
+          # Delete root composite resource (cascade will delete children)
+          echo "=== Deleting root resource ($ROOT_RESOURCE_TYPE) ==="
+          kubectl get "$ROOT_RESOURCE_TYPE" -n default --no-headers 2>/dev/null | awk '{print $1}' | while read -r name; do
+            if [ -n "$name" ]; then
+              echo "Deleting $ROOT_RESOURCE_TYPE/$name"
+              kubectl delete "$ROOT_RESOURCE_TYPE" "$name" -n default || true
+            fi
+          done
+
       - name: Wait for cleanup
+        if: always()
         run: |
           CLUSTER_NAME=$(kind get clusters | head -n1)
           kind export kubeconfig --name "$CLUSTER_NAME"
