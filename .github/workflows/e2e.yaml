@@ -44,7 +44,7 @@ on:
         type: string
 
       debug-resource-types:
-        description: 'Comma-separated list of additional resource types to debug (format: kind.apiVersion, e.g., IdentityCenter.aws.platform.upbound.io)'
+        description: 'JSON array of additional resource types to debug (e.g., ["IdentityCenter.aws.platform.upbound.io", "Organization.aws.platform.upbound.io"])'
         required: false
         type: string
 
@@ -178,12 +178,17 @@ jobs:
             fi
           fi
 
-          # Add user-provided debug resource types
-          if [ -n "${{ inputs.debug-resource-types }}" ]; then
-            if [ -n "$DEBUG_TYPES" ]; then
-              DEBUG_TYPES="${DEBUG_TYPES},${{ inputs.debug-resource-types }}"
-            else
-              DEBUG_TYPES="${{ inputs.debug-resource-types }}"
+          # Add user-provided debug resource types (expects JSON array)
+          USER_TYPES='${{ inputs.debug-resource-types }}'
+          if [ -n "$USER_TYPES" ]; then
+            # Parse JSON array and convert to comma-separated string
+            PARSED_TYPES=$(echo "$USER_TYPES" | jq -r 'if type == "array" then .[] else empty end' 2>/dev/null | paste -sd,)
+            if [ -n "$PARSED_TYPES" ]; then
+              if [ -n "$DEBUG_TYPES" ]; then
+                DEBUG_TYPES="${DEBUG_TYPES},${PARSED_TYPES}"
+              else
+                DEBUG_TYPES="$PARSED_TYPES"
+              fi
             fi
           fi
 
