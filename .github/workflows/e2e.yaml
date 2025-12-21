@@ -208,6 +208,11 @@ jobs:
             # Parse JSON array and convert to comma-separated string
             PARSED_TYPES=$(echo "$USER_TYPES" | jq -r 'if type == "array" then .[] else empty end' 2>/dev/null | paste -sd,)
             if [ -n "$PARSED_TYPES" ]; then
+              # If no root resource type discovered from example, use first from debug-resource-types
+              if [ -z "$ROOT_RESOURCE_TYPE" ]; then
+                ROOT_RESOURCE_TYPE=$(echo "$PARSED_TYPES" | cut -d',' -f1)
+                echo "Using first debug resource type as root: $ROOT_RESOURCE_TYPE"
+              fi
               if [ -n "$DEBUG_TYPES" ]; then
                 DEBUG_TYPES="${DEBUG_TYPES},${PARSED_TYPES}"
               else
@@ -290,7 +295,7 @@ jobs:
             done
           fi
 
-      - name: Force delete root resource
+      - name: Delete Test Resources
         if: always()
         run: |
           if [ "${{ steps.test.outcome }}" = "success" ]; then
