@@ -44,7 +44,7 @@ on:
         type: string
 
       debug-resource-types:
-        description: 'JSON array of additional resource types to debug (e.g., ["IdentityCenter.aws.platform.upbound.io", "Organization.aws.platform.upbound.io"])'
+        description: 'JSON array of resource types to print debug information for when tests fail (e.g., ["IdentityCenter.aws.platform.upbound.io", "Organization.aws.platform.upbound.io"])'
         required: false
         type: string
 
@@ -220,8 +220,8 @@ jobs:
           echo "=== All Managed Resources ==="
           kubectl get managed -n default
           echo ""
-          echo "=== Resources with False conditions ==="
-          kubectl get managed -n default | grep False | awk '{print $1}' | while read -r resource; do
+          echo "=== Resources with False or Unknown (-) conditions ==="
+          kubectl get managed -n default | awk 'NR>1 && ($2 == "False" || $2 == "-" || $3 == "False" || $3 == "-") {print $1}' | while read -r resource; do
             if [ -n "$resource" ]; then
               echo ""
               echo "=== $resource YAML ==="
