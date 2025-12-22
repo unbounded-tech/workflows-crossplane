@@ -60,6 +60,18 @@ on:
         type: boolean
         default: true
 
+      debug-usages:
+        description: 'Show kubectl get usages output for debugging'
+        required: false
+        type: boolean
+        default: true
+
+      namespace:
+        description: 'Kubernetes namespace for test resources'
+        required: false
+        type: string
+        default: 'default'
+
     secrets:
       GH_PAT:
         description: 'Token for ghcr.io package write access'
@@ -235,7 +247,7 @@ jobs:
           CLUSTER_NAME=$(kind get clusters | head -n1)
           kind export kubeconfig --name "$CLUSTER_NAME"
           echo "=== Namespace Events ==="
-          kubectl get events -n default --sort-by='.lastTimestamp'
+          kubectl get events -n ${{ inputs.namespace }} --sort-by='.lastTimestamp'
 
       - name: Debug failed resources
         if: always()
@@ -247,23 +259,46 @@ jobs:
           CLUSTER_NAME=$(kind get clusters | head -n1)
           kind export kubeconfig --name "$CLUSTER_NAME"
           echo "=== All Managed Resources ==="
-          kubectl get managed -n default
+          kubectl get managed -n ${{ inputs.namespace }}
           echo ""
           echo "=== Resources with False or Unknown (-) conditions ==="
-          kubectl get managed -n default | awk 'NR>1 && ($2 == "False" || $2 == "-" || $3 == "False" || $3 == "-") {print $1}' | while read -r resource; do
+          kubectl get managed -n ${{ inputs.namespace }} | awk 'NR>1 && ($2 == "False" || $2 == "-" || $3 == "False" || $3 == "-") {print $1}' | while read -r resource; do
             if [ -n "$resource" ]; then
               if [ "${{ inputs.debug-get-yaml }}" = "true" ]; then
                 echo ""
                 echo "=== $resource YAML ==="
-                kubectl get "$resource" -o yaml || true
+                kubectl get "$resource" -n ${{ inputs.namespace }} -o yaml || true
               fi
               if [ "${{ inputs.debug-describe }}" = "true" ]; then
                 echo ""
                 echo "=== $resource Describe ==="
-                kubectl describe "$resource" || true
+                kubectl describe "$resource" -n ${{ inputs.namespace }} || true
               fi
             fi
           done
+
+          # Debug usages
+          if [ "${{ inputs.debug-usages }}" = "true" ]; then
+            echo ""
+            echo "=== Usages ==="
+            kubectl get usages -n ${{ inputs.namespace }} || true
+            echo ""
+            echo "=== Debugging usages ==="
+            kubectl get usages -n ${{ inputs.namespace }} --no-headers 2>/dev/null | awk '{print $1}' | while read -r usage; do
+              if [ -n "$usage" ]; then
+                if [ "${{ inputs.debug-get-yaml }}" = "true" ]; then
+                  echo ""
+                  echo "=== usage/$usage YAML ==="
+                  kubectl get usage "$usage" -n ${{ inputs.namespace }} -o yaml || true
+                fi
+                if [ "${{ inputs.debug-describe }}" = "true" ]; then
+                  echo ""
+                  echo "=== usage/$usage Describe ==="
+                  kubectl describe usage "$usage" -n ${{ inputs.namespace }} || true
+                fi
+              fi
+            done
+          fi
 
           # Debug each resource type
           if [ -n "$DEBUG_TYPES" ]; then
@@ -273,18 +308,18 @@ jobs:
               if [ -n "$resource_type" ]; then
                 echo ""
                 echo "=== Checking $resource_type in default namespace ==="
-                if kubectl get "$resource_type" -n default --no-headers 2>/dev/null | head -n1 | grep -q .; then
-                  kubectl get "$resource_type" -n default --no-headers | awk '{print $1}' | while read -r name; do
+                if kubectl get "$resource_type" -n ${{ inputs.namespace }} --no-headers 2>/dev/null | head -n1 | grep -q .; then
+                  kubectl get "$resource_type" -n ${{ inputs.namespace }} --no-headers | awk '{print $1}' | while read -r name; do
                     if [ -n "$name" ]; then
                       if [ "${{ inputs.debug-get-yaml }}" = "true" ]; then
                         echo ""
                         echo "=== $resource_type/$name YAML ==="
-                        kubectl get "$resource_type" "$name" -n default -o yaml || true
+                        kubectl get "$resource_type" "$name" -n ${{ inputs.namespace }} -o yaml || true
                       fi
                       if [ "${{ inputs.debug-describe }}" = "true" ]; then
                         echo ""
                         echo "=== $resource_type/$name Describe ==="
-                        kubectl describe "$resource_type" "$name" -n default || true
+                        kubectl describe "$resource_type" "$name" -n ${{ inputs.namespace }} || true
                       fi
                     fi
                   done
@@ -311,10 +346,10 @@ jobs:
 
           # Delete root composite resource (cascade will delete children)
           echo "=== Deleting root resource ($ROOT_RESOURCE_TYPE) ==="
-          kubectl get "$ROOT_RESOURCE_TYPE" -n default --no-headers 2>/dev/null | awk '{print $1}' | while read -r name; do
+          kubectl get "$ROOT_RESOURCE_TYPE" -n ${{ inputs.namespace }} --no-headers 2>/dev/null | awk '{print $1}' | while read -r name; do
             if [ -n "$name" ]; then
               echo "Deleting $ROOT_RESOURCE_TYPE/$name"
-              kubectl delete "$ROOT_RESOURCE_TYPE" "$name" -n default || true
+              kubectl delete "$ROOT_RESOURCE_TYPE" "$name" -n ${{ inputs.namespace }} || true
             fi
           done
 
@@ -324,8 +359,8 @@ jobs:
         run: |
           CLUSTER_NAME=$(kind get clusters | head -n1)
           kind export kubeconfig --name "$CLUSTER_NAME"
-          kubectl get managed -n default
-          kubectl wait --for=delete --timeout=${{ inputs.cleanup-timeout-minutes }}m -n default --all managed
+          kubectl get managed -n ${{ inputs.namespace }}
+          kubectl wait --for=delete --timeout=${{ inputs.cleanup-timeout-minutes }}m -n ${{ inputs.namespace }} --all managed
 
       - name: Debug remaining resources after cleanup failure
         if: always() && steps.cleanup.outcome != 'success'
@@ -333,20 +368,43 @@ jobs:
           CLUSTER_NAME=$(kind get clusters | head -n1)
           kind export kubeconfig --name "$CLUSTER_NAME"
           echo "=== Cleanup failed - listing remaining managed resources ==="
-          kubectl get managed -n default
+          kubectl get managed -n ${{ inputs.namespace }}
           echo ""
           echo "=== Debugging all remaining resources ==="
-          kubectl get managed -n default --no-headers 2>/dev/null | awk '{print $1}' | while read -r resource; do
+          kubectl get managed -n ${{ inputs.namespace }} --no-headers 2>/dev/null | awk '{print $1}' | while read -r resource; do
             if [ -n "$resource" ]; then
               if [ "${{ inputs.debug-get-yaml }}" = "true" ]; then
                 echo ""
                 echo "=== $resource YAML ==="
-                kubectl get "$resource" -o yaml || true
+                kubectl get "$resource" -n ${{ inputs.namespace }} -o yaml || true
               fi
               if [ "${{ inputs.debug-describe }}" = "true" ]; then
                 echo ""
                 echo "=== $resource Describe ==="
-                kubectl describe "$resource" || true
+                kubectl describe "$resource" -n ${{ inputs.namespace }} || true
               fi
             fi
           done
+
+          # Debug usages
+          if [ "${{ inputs.debug-usages }}" = "true" ]; then
+            echo ""
+            echo "=== Usages ==="
+            kubectl get usages -n ${{ inputs.namespace }} || true
+            echo ""
+            echo "=== Debugging usages ==="
+            kubectl get usages -n ${{ inputs.namespace }} --no-headers 2>/dev/null | awk '{print $1}' | while read -r usage; do
+              if [ -n "$usage" ]; then
+                if [ "${{ inputs.debug-get-yaml }}" = "true" ]; then
+                  echo ""
+                  echo "=== usage/$usage YAML ==="
+                  kubectl get usage "$usage" -n ${{ inputs.namespace }} -o yaml || true
+                fi
+                if [ "${{ inputs.debug-describe }}" = "true" ]; then
+                  echo ""
+                  echo "=== usage/$usage Describe ==="
+                  kubectl describe usage "$usage" -n ${{ inputs.namespace }} || true
+                fi
+              fi
+            done
+          fi
