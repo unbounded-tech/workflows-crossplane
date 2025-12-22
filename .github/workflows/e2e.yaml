@@ -319,9 +319,34 @@ jobs:
           done
 
       - name: Wait for cleanup
+        id: cleanup
         if: always()
         run: |
           CLUSTER_NAME=$(kind get clusters | head -n1)
           kind export kubeconfig --name "$CLUSTER_NAME"
           kubectl get managed -n default
           kubectl wait --for=delete --timeout=${{ inputs.cleanup-timeout-minutes }}m -n default --all managed
+
+      - name: Debug remaining resources after cleanup failure
+        if: always() && steps.cleanup.outcome != 'success'
+        run: |
+          CLUSTER_NAME=$(kind get clusters | head -n1)
+          kind export kubeconfig --name "$CLUSTER_NAME"
+          echo "=== Cleanup failed - listing remaining managed resources ==="
+          kubectl get managed -n default
+          echo ""
+          echo "=== Debugging all remaining resources ==="
+          kubectl get managed -n default --no-headers 2>/dev/null | awk '{print $1}' | while read -r resource; do
+            if [ -n "$resource" ]; then
+              if [ "${{ inputs.debug-get-yaml }}" = "true" ]; then
+                echo ""
+                echo "=== $resource YAML ==="
+                kubectl get "$resource" -o yaml || true
+              fi
+              if [ "${{ inputs.debug-describe }}" = "true" ]; then
+                echo ""
+                echo "=== $resource Describe ==="
+                kubectl describe "$resource" || true
+              fi
+            fi
+          done
