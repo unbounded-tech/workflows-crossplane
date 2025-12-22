@@ -195,7 +195,7 @@ jobs:
         run: |
           up test run ${{ inputs.pattern }} --e2e --skip-control-plane-cleanup
 
-      - name: Discover debug resource types
+      - name: Set debug resource types
         if: always()
         run: |
           ROOT_RESOURCE_TYPE=""
@@ -237,7 +237,7 @@ jobs:
           echo "DEBUG_TYPES=$DEBUG_TYPES" >> "$GITHUB_ENV"
           echo "Debug resource types: $DEBUG_TYPES"
 
-      - name: Debug namespace events
+      - name: (Debug) Log namespace events
         if: always()
         run: |
           if [ "${{ steps.test.outcome }}" = "success" ]; then
@@ -249,7 +249,7 @@ jobs:
           echo "=== Namespace Events ==="
           kubectl get events -n ${{ inputs.namespace }} --sort-by='.lastTimestamp'
 
-      - name: Debug failed resources
+      - name: (Debug) Logs For Managed Resources
         if: always()
         run: |
           if [ "${{ steps.test.outcome }}" = "success" ]; then
@@ -277,64 +277,78 @@ jobs:
             fi
           done
 
-          # Debug usages
-          if [ "${{ inputs.debug-usages }}" = "true" ]; then
-            echo ""
-            echo "=== Usages ==="
-            kubectl get usages -n ${{ inputs.namespace }} || true
-            echo ""
-            echo "=== Debugging usages ==="
-            kubectl get usages -n ${{ inputs.namespace }} --no-headers 2>/dev/null | awk '{print $1}' | while read -r usage; do
-              if [ -n "$usage" ]; then
-                if [ "${{ inputs.debug-get-yaml }}" = "true" ]; then
-                  echo ""
-                  echo "=== usage/$usage YAML ==="
-                  kubectl get usage "$usage" -n ${{ inputs.namespace }} -o yaml || true
-                fi
-                if [ "${{ inputs.debug-describe }}" = "true" ]; then
-                  echo ""
-                  echo "=== usage/$usage Describe ==="
-                  kubectl describe usage "$usage" -n ${{ inputs.namespace }} || true
-                fi
-              fi
-            done
+      - name: (Debug) Logs For Usages
+        if: always() && inputs.debug-usages
+        run: |
+          if [ "${{ steps.test.outcome }}" = "success" ]; then
+            echo "Test passed, skipping debug output"
+            exit 0
           fi
-
-          # Debug each resource type
-          if [ -n "$DEBUG_TYPES" ]; then
-            echo ""
-            echo "=== Debugging composite resources ==="
-            echo "$DEBUG_TYPES" | tr ',' '\n' | while read -r resource_type; do
-              if [ -n "$resource_type" ]; then
+          CLUSTER_NAME=$(kind get clusters | head -n1)
+          kind export kubeconfig --name "$CLUSTER_NAME"
+          echo "=== Usages ==="
+          kubectl get usages -n ${{ inputs.namespace }} || true
+          echo ""
+          echo "=== Debugging usages ==="
+          kubectl get usages -n ${{ inputs.namespace }} --no-headers 2>/dev/null | awk '{print $1}' | while read -r usage; do
+            if [ -n "$usage" ]; then
+              if [ "${{ inputs.debug-get-yaml }}" = "true" ]; then
                 echo ""
-                echo "=== Checking $resource_type in default namespace ==="
-                if kubectl get "$resource_type" -n ${{ inputs.namespace }} --no-headers 2>/dev/null | head -n1 | grep -q .; then
-                  kubectl get "$resource_type" -n ${{ inputs.namespace }} --no-headers | awk '{print $1}' | while read -r name; do
-                    if [ -n "$name" ]; then
-                      if [ "${{ inputs.debug-get-yaml }}" = "true" ]; then
-                        echo ""
-                        echo "=== $resource_type/$name YAML ==="
-                        kubectl get "$resource_type" "$name" -n ${{ inputs.namespace }} -o yaml || true
-                      fi
-                      if [ "${{ inputs.debug-describe }}" = "true" ]; then
-                        echo ""
-                        echo "=== $resource_type/$name Describe ==="
-                        kubectl describe "$resource_type" "$name" -n ${{ inputs.namespace }} || true
-                      fi
-                    fi
-                  done
-                else
-                  echo "No $resource_type resources found in default namespace"
-                fi
+                echo "=== usage/$usage YAML ==="
+                kubectl get usage "$usage" -n ${{ inputs.namespace }} -o yaml || true
               fi
-            done
-          fi
+              if [ "${{ inputs.debug-describe }}" = "true" ]; then
+                echo ""
+                echo "=== usage/$usage Describe ==="
+                kubectl describe usage "$usage" -n ${{ inputs.namespace }} || true
+              fi
+            fi
+          done
 
-      - name: Delete Test Resources
+      - name: (Debug) Logs For Composite Resources
         if: always()
         run: |
           if [ "${{ steps.test.outcome }}" = "success" ]; then
-            echo "Test passed, skipping force delete"
+            echo "Test passed, skipping debug output"
+            exit 0
+          fi
+          if [ -z "$DEBUG_TYPES" ]; then
+            echo "No debug resource types configured, skipping"
+            exit 0
+          fi
+          CLUSTER_NAME=$(kind get clusters | head -n1)
+          kind export kubeconfig --name "$CLUSTER_NAME"
+          echo "=== Debugging composite resources ==="
+          echo "$DEBUG_TYPES" | tr ',' '\n' | while read -r resource_type; do
+            if [ -n "$resource_type" ]; then
+              echo ""
+              echo "=== Checking $resource_type ==="
+              if kubectl get "$resource_type" -n ${{ inputs.namespace }} --no-headers 2>/dev/null | head -n1 | grep -q .; then
+                kubectl get "$resource_type" -n ${{ inputs.namespace }} --no-headers | awk '{print $1}' | while read -r name; do
+                  if [ -n "$name" ]; then
+                    if [ "${{ inputs.debug-get-yaml }}" = "true" ]; then
+                      echo ""
+                      echo "=== $resource_type/$name YAML ==="
+                      kubectl get "$resource_type" "$name" -n ${{ inputs.namespace }} -o yaml || true
+                    fi
+                    if [ "${{ inputs.debug-describe }}" = "true" ]; then
+                      echo ""
+                      echo "=== $resource_type/$name Describe ==="
+                      kubectl describe "$resource_type" "$name" -n ${{ inputs.namespace }} || true
+                    fi
+                  fi
+                done
+              else
+                echo "No $resource_type resources found"
+              fi
+            fi
+          done
+
+      - name: (Debug) Delete Test Resources
+        if: always()
+        run: |
+          if [ "${{ steps.test.outcome }}" = "success" ]; then
+            echo "Test passed, skipping delete - when tests pass, resources should be cleaned up normally"
             exit 0
           fi
           if [ -z "$ROOT_RESOURCE_TYPE" ]; then
@@ -362,7 +376,7 @@ jobs:
           kubectl get managed -n ${{ inputs.namespace }}
           kubectl wait --for=delete --timeout=${{ inputs.cleanup-timeout-minutes }}m -n ${{ inputs.namespace }} --all managed
 
-      - name: Debug remaining resources after cleanup failure
+      - name: (Debug) Log Remaining Managed Resources
         if: always() && steps.cleanup.outcome != 'success'
         run: |
           CLUSTER_NAME=$(kind get clusters | head -n1)
@@ -386,25 +400,61 @@ jobs:
             fi
           done
 
-          # Debug usages
-          if [ "${{ inputs.debug-usages }}" = "true" ]; then
-            echo ""
-            echo "=== Usages ==="
-            kubectl get usages -n ${{ inputs.namespace }} || true
-            echo ""
-            echo "=== Debugging usages ==="
-            kubectl get usages -n ${{ inputs.namespace }} --no-headers 2>/dev/null | awk '{print $1}' | while read -r usage; do
-              if [ -n "$usage" ]; then
-                if [ "${{ inputs.debug-get-yaml }}" = "true" ]; then
-                  echo ""
-                  echo "=== usage/$usage YAML ==="
-                  kubectl get usage "$usage" -n ${{ inputs.namespace }} -o yaml || true
-                fi
-                if [ "${{ inputs.debug-describe }}" = "true" ]; then
-                  echo ""
-                  echo "=== usage/$usage Describe ==="
-                  kubectl describe usage "$usage" -n ${{ inputs.namespace }} || true
-                fi
+      - name: (Debug) Log Remaining Usages
+        if: always() && steps.cleanup.outcome != 'success' && inputs.debug-usages
+        run: |
+          CLUSTER_NAME=$(kind get clusters | head -n1)
+          kind export kubeconfig --name "$CLUSTER_NAME"
+          echo "=== Usages ==="
+          kubectl get usages -n ${{ inputs.namespace }} || true
+          echo ""
+          echo "=== Debugging usages ==="
+          kubectl get usages -n ${{ inputs.namespace }} --no-headers 2>/dev/null | awk '{print $1}' | while read -r usage; do
+            if [ -n "$usage" ]; then
+              if [ "${{ inputs.debug-get-yaml }}" = "true" ]; then
+                echo ""
+                echo "=== usage/$usage YAML ==="
+                kubectl get usage "$usage" -n ${{ inputs.namespace }} -o yaml || true
               fi
-            done
+              if [ "${{ inputs.debug-describe }}" = "true" ]; then
+                echo ""
+                echo "=== usage/$usage Describe ==="
+                kubectl describe usage "$usage" -n ${{ inputs.namespace }} || true
+              fi
+            fi
+          done
+
+      - name: (Debug) Log Remaining Composite Resources
+        if: always() && steps.cleanup.outcome != 'success'
+        run: |
+          if [ -z "$DEBUG_TYPES" ]; then
+            echo "No debug resource types configured, skipping"
+            exit 0
           fi
+          CLUSTER_NAME=$(kind get clusters | head -n1)
+          kind export kubeconfig --name "$CLUSTER_NAME"
+          echo "=== Debugging composite resources ==="
+          echo "$DEBUG_TYPES" | tr ',' '\n' | while read -r resource_type; do
+            if [ -n "$resource_type" ]; then
+              echo ""
+              echo "=== Checking $resource_type ==="
+              if kubectl get "$resource_type" -n ${{ inputs.namespace }} --no-headers 2>/dev/null | head -n1 | grep -q .; then
+                kubectl get "$resource_type" -n ${{ inputs.namespace }} --no-headers | awk '{print $1}' | while read -r name; do
+                  if [ -n "$name" ]; then
+                    if [ "${{ inputs.debug-get-yaml }}" = "true" ]; then
+                      echo ""
+                      echo "=== $resource_type/$name YAML ==="
+                      kubectl get "$resource_type" "$name" -n ${{ inputs.namespace }} -o yaml || true
+                    fi
+                    if [ "${{ inputs.debug-describe }}" = "true" ]; then
+                      echo ""
+                      echo "=== $resource_type/$name Describe ==="
+                      kubectl describe "$resource_type" "$name" -n ${{ inputs.namespace }} || true
+                    fi
+                  fi
+                done
+              else
+                echo "No $resource_type resources found"
+              fi
+            fi
+          done
