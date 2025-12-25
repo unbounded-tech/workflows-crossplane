@@ -38,11 +38,6 @@ on:
         type: boolean
         default: false
 
-      debug-example-path:
-        description: 'Path to example YAML file to auto-discover root resource type for debugging'
-        required: false
-        type: string
-
       debug-resource-types:
         description: 'JSON array of resource types to print debug information for when tests fail (e.g., ["IdentityCenter.aws.platform.upbound.io", "Organization.aws.platform.upbound.io"])'
         required: false
@@ -201,18 +196,24 @@ jobs:
           ROOT_RESOURCE_TYPE=""
           DEBUG_TYPES=""
 
-          # Auto-discover root resource type from example file
-          if [ -n "${{ inputs.debug-example-path }}" ] && [ -f "${{ inputs.debug-example-path }}" ]; then
-            EXAMPLE_KIND=$(yq '.kind' "${{ inputs.debug-example-path }}")
-            EXAMPLE_API=$(yq '.apiVersion' "${{ inputs.debug-example-path }}")
-            if [ -n "$EXAMPLE_KIND" ] && [ "$EXAMPLE_KIND" != "null" ] && [ -n "$EXAMPLE_API" ] && [ "$EXAMPLE_API" != "null" ]; then
-              # Convert apiVersion (e.g., aws.platform.upbound.io/v1alpha1) to group (aws.platform.upbound.io)
-              EXAMPLE_GROUP=$(echo "$EXAMPLE_API" | cut -d'/' -f1)
-              ROOT_RESOURCE_TYPE="${EXAMPLE_KIND}.${EXAMPLE_GROUP}"
-              DEBUG_TYPES="$ROOT_RESOURCE_TYPE"
-              echo "Discovered root resource type: $ROOT_RESOURCE_TYPE"
+          # Auto-discover root resource types from apis/**/definition.yaml files
+          for def_file in apis/*/definition.yaml; do
+            if [ -f "$def_file" ]; then
+              # Extract metadata.name which contains the full resource type (e.g., identitycenters.aws.hops.ops.com.ai)
+              DEF_NAME=$(yq '.metadata.name' "$def_file")
+              if [ -n "$DEF_NAME" ] && [ "$DEF_NAME" != "null" ]; then
+                echo "Discovered resource type from $def_file: $DEF_NAME"
+                if [ -z "$ROOT_RESOURCE_TYPE" ]; then
+                  ROOT_RESOURCE_TYPE="$DEF_NAME"
+                fi
+                if [ -z "$DEBUG_TYPES" ]; then
+                  DEBUG_TYPES="$DEF_NAME"
+                else
+                  DEBUG_TYPES="${DEBUG_TYPES},${DEF_NAME}"
+                fi
+              fi
             fi
-          fi
+          done
 
           # Add user-provided debug resource types (expects JSON array)
           USER_TYPES='${{ inputs.debug-resource-types }}'
