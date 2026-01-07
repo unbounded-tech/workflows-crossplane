@@ -128,13 +128,18 @@ A reusable workflow that runs end-to-end tests for Crossplane compositions using
 - `timeout-minutes` (optional): Timeout in minutes for the e2e test step (default: `20`)
 - `cleanup-timeout-minutes` (optional): Timeout in minutes for the cleanup step (default: `10`)
 - `aws` (optional): Enable AWS credentials setup (default: `false`)
+- `aws-use-oidc` (optional): Use GitHub OIDC to assume an AWS role (default: `false`)
+- `aws-role-name` (optional): AWS IAM role name to assume via OIDC (default: `hops-github-actions`)
+- `aws-role-arn` (optional): AWS IAM role ARN to assume via OIDC (overrides `aws-role-name` + `aws-account-id`)
+- `aws-account-id` (optional): AWS account ID used to build role ARN when `aws-role-arn` is not provided
+- `aws-region` (optional): AWS region for OIDC credential configuration (default: `us-east-1`)
 
 #### Secrets
 
 - `GH_PAT` (optional): Personal access token for GitHub Container Registry write access (required if `ghcr_user` is provided)
-- `AWS_ACCESS_KEY_ID` (optional): AWS Access Key ID for E2E tests (required if `aws` is `true`)
-- `AWS_SECRET_ACCESS_KEY` (optional): AWS Secret Access Key for E2E tests (required if `aws` is `true`)
-- `AWS_SESSION_TOKEN` (optional): AWS Session Token for E2E tests (required for OIDC/assumed roles)
+- `AWS_ACCESS_KEY_ID` (optional): AWS Access Key ID for E2E tests (required if `aws` is `true` and `aws-use-oidc` is `false`)
+- `AWS_SECRET_ACCESS_KEY` (optional): AWS Secret Access Key for E2E tests (required if `aws` is `true` and `aws-use-oidc` is `false`)
+- `AWS_SESSION_TOKEN` (optional): AWS Session Token for E2E tests (required for OIDC/assumed roles when providing credentials via secrets)
 
 #### Permissions
 
@@ -173,7 +178,34 @@ jobs:
       GH_PAT: ${{ secrets.GH_PAT }}
 ```
 
-With AWS credentials using OIDC assumable role (recommended):
+With AWS credentials using OIDC role assumption (recommended):
+
+```yaml
+name: E2E Tests
+
+on:
+  push:
+    branches: [ main ]
+
+permissions:
+  id-token: write
+  contents: read
+  packages: read
+
+jobs:
+  e2e:
+    uses: unbounded-tech/workflows-crossplane/.github/workflows/e2e.yaml@main
+    with:
+      aws: true
+      aws-use-oidc: true
+      aws-account-id: 123456789012
+      aws-role-name: hops-github-actions
+      aws-region: us-east-1
+    secrets:
+      GH_PAT: ${{ secrets.GH_PAT }}
+```
+
+With AWS credentials using OIDC assumable role via a separate job:
 
 ```yaml
 name: E2E Tests
