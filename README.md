@@ -131,7 +131,7 @@ A reusable workflow that runs end-to-end tests for Crossplane compositions using
 - `aws-use-oidc` (optional): Use GitHub OIDC to assume an AWS role (default: `false`)
 - `aws-role-name` (optional): AWS IAM role name to assume via OIDC (default: `hops-github-actions`)
 - `aws-role-arn` (optional): AWS IAM role ARN to assume via OIDC (overrides `aws-role-name` + `aws-account-id`)
-- `aws-account-id` (optional): AWS account ID used to build role ARN when `aws-role-arn` is not provided
+- `aws-account-id` (optional): AWS account ID used to build role ARN when `aws-role-arn` is not provided (quote values with leading zeros)
 - `aws-region` (optional): AWS region for OIDC credential configuration (default: `us-east-1`)
 
 #### Secrets
@@ -198,7 +198,7 @@ jobs:
     with:
       aws: true
       aws-use-oidc: true
-      aws-account-id: 123456789012
+      aws-account-id: "123456789012"
       aws-role-name: hops-github-actions
       aws-region: us-east-1
     secrets:
