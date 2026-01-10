@@ -5,11 +5,27 @@ inputs:
   pull-kind-node:
     description: 'Pull kindest/node image for Kind clusters'
     required: false
-    default: 'true'
+    default: 'false'
   kind-node-version:
     description: 'Kind node version to pull'
     required: false
     default: 'v1.33.1'
+  pull-upbound-images:
+    description: 'Pull internal Upbound CLI images (olareg, datamodel-code-generator, kcl, function-go-templating-base)'
+    required: false
+    default: 'true'
+  pull-from-upbound-yaml:
+    description: 'Pull functions/providers/configurations from upbound.yaml'
+    required: false
+    default: 'true'
+  extra-docker-images:
+    description: 'Comma-separated list of additional Docker images to pull'
+    required: false
+    default: ''
+  extra-oci-images:
+    description: 'Comma-separated list of additional OCI images to pull with crane'
+    required: false
+    default: ''
 
 runs:
   using: 'composite'
@@ -24,34 +40,77 @@ runs:
     - name: Pre-pull images
       shell: bash
       run: |
-        # Pre-pull images used by `up` CLI to prevent timeout issues
         echo "Pre-pulling Docker/OCI images in parallel..."
 
         # Create temp directory for logs
         LOGDIR=$(mktemp -d)
 
-        # Standard Docker images (kindest/node is public on Docker Hub)
+        # Kind node (Docker image)
         if [ "${{ inputs.pull-kind-node }}" = "true" ]; then
           docker pull kindest/node:${{ inputs.kind-node-version }} > "$LOGDIR/docker-kindest-node.log" 2>&1 &
         fi
 
-        # Upbound internal images used by `up` CLI (from xpkg.upbound.io)
-        # These are verified to exist; crane digest fetches manifest only
-        (crane digest xpkg.upbound.io/upbound/olareg:v0.1.2 > "$LOGDIR/upbound-olareg.log" 2>&1 && echo "Verified: xpkg.upbound.io/upbound/olareg:v0.1.2" >> "$LOGDIR/upbound-olareg.log") &
-        (crane digest xpkg.upbound.io/upbound/datamodel-code-generator:v0.31.2 > "$LOGDIR/upbound-datamodel-code-generator.log" 2>&1 && echo "Verified: xpkg.upbound.io/upbound/datamodel-code-generator:v0.31.2" >> "$LOGDIR/upbound-datamodel-code-generator.log") &
-        (crane digest xpkg.upbound.io/upbound/kcl:v0.11.2 > "$LOGDIR/upbound-kcl.log" 2>&1 && echo "Verified: xpkg.upbound.io/upbound/kcl:v0.11.2" >> "$LOGDIR/upbound-kcl.log") &
-        (crane digest xpkg.upbound.io/upbound/function-go-templating-base:v0.9.0-13-gd1fa2e3 > "$LOGDIR/upbound-function-go-templating-base.log" 2>&1 && echo "Verified: xpkg.upbound.io/upbound/function-go-templating-base:v0.9.0-13-gd1fa2e3" >> "$LOGDIR/upbound-function-go-templating-base.log") &
+        # Extra Docker images
+        if [ -n "${{ inputs.extra-docker-images }}" ]; then
+          while read img; do
+            img=$(echo "$img" | xargs)  # trim whitespace
+            if [ -n "$img" ]; then
+              name=$(echo "$img" | sed 's|.*/||' | sed 's/:/-/g')
+              docker pull "$img" > "$LOGDIR/docker-$name.log" 2>&1 &
+            fi
+          done < <(echo "${{ inputs.extra-docker-images }}" | tr ',' '\n')
+        fi
 
-        # Extract and pull function/provider/configuration packages from upbound.yaml using crane
-        # Note: upbound.yaml has package and version as separate fields, version may have semver operators like >=
-        if [ -f upbound.yaml ]; then
+        # Upbound internal images used by `up` CLI (from xpkg.upbound.io)
+        # Dynamically look up latest versions
+        if [ "${{ inputs.pull-upbound-images }}" = "true" ]; then
+          for img in olareg datamodel-code-generator kcl function-go-templating-base; do
+            (
+              base="xpkg.upbound.io/upbound/$img"
+              # Get all semver tags sorted
+              all_tags=$(crane ls "$base" 2>/dev/null | grep -E '^v[0-9]' | sort -V)
+              if [ -z "$all_tags" ]; then
+                all_tags=$(crane ls "$base" 2>/dev/null)
+              fi
+
+              # Get latest and recent versions
+              tag=$(echo "$all_tags" | tail -1)
+              recent=$(echo "$all_tags" | tail -5 | tac | tr '\n' ' ')
+
+              if [ -n "$tag" ]; then
+                full="$base:$tag"
+                echo "Recent versions: $recent" > "$LOGDIR/upbound-$img.log"
+                echo "Selected: $tag" >> "$LOGDIR/upbound-$img.log"
+                crane digest "$full" >> "$LOGDIR/upbound-$img.log" 2>&1
+                echo "Verified: $full" >> "$LOGDIR/upbound-$img.log"
+              else
+                echo "Error: Could not find tags for $base" > "$LOGDIR/upbound-$img.log"
+              fi
+            ) &
+          done
+        fi
+
+        # Extra OCI images (pulled with crane)
+        if [ -n "${{ inputs.extra-oci-images }}" ]; then
+          while read img; do
+            img=$(echo "$img" | xargs)  # trim whitespace
+            if [ -n "$img" ]; then
+              name=$(echo "$img" | sed 's|.*/||' | sed 's/:/-/g')
+              (crane digest "$img" > "$LOGDIR/oci-$name.log" 2>&1 && echo "Verified: $img" >> "$LOGDIR/oci-$name.log") &
+            fi
+          done < <(echo "${{ inputs.extra-oci-images }}" | tr ',' '\n')
+        fi
+
+        # Extract and pull function/provider/configuration packages from upbound.yaml
+        if [ "${{ inputs.pull-from-upbound-yaml }}" = "true" ] && [ -f upbound.yaml ]; then
           # Pull functions (combine package + version, strip semver operators)
-          yq -r '.spec.dependsOn[] | select(.kind == "Function") | .package + ":" + (.version | sub("^[>=<^~]+"; ""))' upbound.yaml 2>/dev/null | while read pkg; do
+          # Use process substitution to avoid subshell issues with background jobs
+          while read pkg; do
             if [ -n "$pkg" ]; then
               name=$(echo "$pkg" | sed 's|.*/||' | sed 's/:/-/g')
               (crane digest "$pkg" > "$LOGDIR/function-$name.log" 2>&1 && echo "Verified: $pkg" >> "$LOGDIR/function-$name.log") &
             fi
-          done
+          done < <(yq -r '.spec.dependsOn[] | select(.kind == "Function") | .package + ":" + (.version | sub("^[>=<^~]+"; ""))' upbound.yaml 2>/dev/null)
 
           # Check if any provider-aws-* is used, if so pull provider-family-aws once
           first_aws_pkg=$(yq -r '.spec.dependsOn[] | select(.kind == "Provider") | .package + ":" + (.version | sub("^[>=<^~]+"; ""))' upbound.yaml 2>/dev/null | grep "provider-aws-" | head -1)
@@ -62,20 +121,20 @@ runs:
           fi
 
           # Pull providers (combine package + version, strip semver operators)
-          yq -r '.spec.dependsOn[] | select(.kind == "Provider") | .package + ":" + (.version | sub("^[>=<^~]+"; ""))' upbound.yaml 2>/dev/null | while read pkg; do
+          while read pkg; do
             if [ -n "$pkg" ]; then
               name=$(echo "$pkg" | sed 's|.*/||' | sed 's/:/-/g')
               (crane digest "$pkg" > "$LOGDIR/provider-$name.log" 2>&1 && echo "Verified: $pkg" >> "$LOGDIR/provider-$name.log") &
             fi
-          done
+          done < <(yq -r '.spec.dependsOn[] | select(.kind == "Provider") | .package + ":" + (.version | sub("^[>=<^~]+"; ""))' upbound.yaml 2>/dev/null)
 
           # Pull configurations (combine package + version, strip semver operators)
-          yq -r '.spec.dependsOn[] | select(.kind == "Configuration") | .package + ":" + (.version | sub("^[>=<^~]+"; ""))' upbound.yaml 2>/dev/null | while read pkg; do
+          while read pkg; do
             if [ -n "$pkg" ]; then
               name=$(echo "$pkg" | sed 's|.*/||' | sed 's/:/-/g')
               (crane digest "$pkg" > "$LOGDIR/configuration-$name.log" 2>&1 && echo "Verified: $pkg" >> "$LOGDIR/configuration-$name.log") &
             fi
-          done
+          done < <(yq -r '.spec.dependsOn[] | select(.kind == "Configuration") | .package + ":" + (.version | sub("^[>=<^~]+"; ""))' upbound.yaml 2>/dev/null)
         fi
 
         # Wait for all background pulls to complete
