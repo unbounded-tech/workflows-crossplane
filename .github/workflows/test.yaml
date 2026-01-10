@@ -20,7 +20,7 @@ on:
         type: string
         default: 'tests/test*'
 
-      debug:
+      test-debug-logs:
         description: 'Enable debug output for up test command'
         required: false
         type: boolean
@@ -90,4 +90,4 @@ jobs:
 
       - name: Test
         run: |
-          up test run ${{ inputs.pattern }} ${{ inputs.debug && '--debug' || '' }}
+          up test run ${{ inputs.pattern }} ${{ inputs.test-debug-logs && '--debug' || '' }}

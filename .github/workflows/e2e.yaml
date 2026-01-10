@@ -95,7 +95,7 @@ on:
         type: string
         default: 'default'
 
-      debug:
+      test-debug-logs:
         description: 'Enable debug output for up test command'
         required: false
         type: boolean
@@ -245,7 +245,7 @@ jobs:
         id: test
         timeout-minutes: ${{ inputs.timeout-minutes }}
         run: |
-          up test run ${{ inputs.pattern }} --e2e --skip-control-plane-cleanup ${{ inputs.debug && '--debug' || '' }}
+          up test run ${{ inputs.pattern }} --e2e --skip-control-plane-cleanup ${{ inputs.test-debug-logs && '--debug' || '' }}
 
       - name: (Debug) Set debug resource types
         if: always()
