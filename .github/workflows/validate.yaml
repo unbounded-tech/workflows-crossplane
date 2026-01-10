@@ -37,6 +37,24 @@ on:
         type: boolean
         default: true
 
+      pre-pull:
+        description: 'Enable pre-pulling of OCI images'
+        required: false
+        type: boolean
+        default: true
+
+      pre-pull-extra-docker-images:
+        description: 'Comma-separated list of additional Docker images to pre-pull'
+        required: false
+        type: string
+        default: ''
+
+      pre-pull-extra-oci-images:
+        description: 'Comma-separated list of additional OCI images to pre-pull with crane'
+        required: false
+        type: string
+        default: ''
+
     secrets:
       GH_PAT:
         description: 'Token for ghcr.io package write access'
@@ -131,13 +149,17 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ github.token }}
 
-      - name: Pre-pull OCI images
-        uses: unbounded-tech/workflows-crossplane/.github/actions/pre-pull-images@feat/cache
-
       - name: Build with up
         uses: upbound/action-up-project@v1.1.2
         with:
           skip-login-check: true
+
+      - name: Pre-pull OCI images
+        if: inputs.pre-pull
+        uses: unbounded-tech/workflows-crossplane/.github/actions/pre-pull-images@feat/cache
+        with:
+          extra-docker-images: ${{ inputs.pre-pull-extra-docker-images }}
+          extra-oci-images: ${{ inputs.pre-pull-extra-oci-images }}
 
       - name: Render Example
         run: |

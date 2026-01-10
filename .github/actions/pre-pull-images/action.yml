@@ -2,7 +2,7 @@ name: 'Pre-pull OCI Images'
 description: 'Pre-pull Docker and OCI images used by Crossplane/Upbound tooling'
 
 inputs:
-  pull-kind-node:
+  kind-node:
     description: 'Pull kindest/node image for Kind clusters'
     required: false
     default: 'false'
@@ -10,11 +10,11 @@ inputs:
     description: 'Kind node version to pull'
     required: false
     default: 'v1.33.1'
-  pull-upbound-images:
+  upbound-images:
     description: 'Pull internal Upbound CLI images (olareg, datamodel-code-generator, kcl, function-go-templating-base)'
     required: false
     default: 'true'
-  pull-from-upbound-yaml:
+  from-upbound-yaml:
     description: 'Pull functions/providers/configurations from upbound.yaml'
     required: false
     default: 'true'
@@ -46,7 +46,7 @@ runs:
         LOGDIR=$(mktemp -d)
 
         # Kind node (Docker image)
-        if [ "${{ inputs.pull-kind-node }}" = "true" ]; then
+        if [ "${{ inputs.kind-node }}" = "true" ]; then
           docker pull kindest/node:${{ inputs.kind-node-version }} > "$LOGDIR/docker-kindest-node.log" 2>&1 &
         fi
 
@@ -63,7 +63,7 @@ runs:
 
         # Upbound internal images used by `up` CLI (from xpkg.upbound.io)
         # Dynamically look up latest versions
-        if [ "${{ inputs.pull-upbound-images }}" = "true" ]; then
+        if [ "${{ inputs.upbound-images }}" = "true" ]; then
           for img in olareg datamodel-code-generator kcl function-go-templating-base; do
             (
               base="xpkg.upbound.io/upbound/$img"
@@ -102,7 +102,7 @@ runs:
         fi
 
         # Extract and pull function/provider/configuration packages from upbound.yaml
-        if [ "${{ inputs.pull-from-upbound-yaml }}" = "true" ] && [ -f upbound.yaml ]; then
+        if [ "${{ inputs.from-upbound-yaml }}" = "true" ] && [ -f upbound.yaml ]; then
           # Pull functions (combine package + version, strip semver operators)
           # Use process substitution to avoid subshell issues with background jobs
           while read pkg; do
