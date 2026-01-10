@@ -108,4 +108,4 @@ jobs:
 
       - name: Test
         run: |
-          up test run ${{ inputs.pattern }}
+          up test run ${{ inputs.pattern }} --debug

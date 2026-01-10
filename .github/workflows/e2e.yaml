@@ -264,7 +264,7 @@ jobs:
         id: test
         timeout-minutes: ${{ inputs.timeout-minutes }}
         run: |
-          up test run ${{ inputs.pattern }} --e2e --skip-control-plane-cleanup
+          up test run ${{ inputs.pattern }} --e2e --skip-control-plane-cleanup --debug
 
       - name: (Debug) Set debug resource types
         if: always()
