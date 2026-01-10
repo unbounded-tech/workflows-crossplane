@@ -45,9 +45,13 @@ runs:
         # Create temp directory for logs
         LOGDIR=$(mktemp -d)
 
+        # Track PIDs and their descriptions
+        declare -A PIDS
+
         # Kind node (Docker image)
         if [ "${{ inputs.kind-node }}" = "true" ]; then
           docker pull kindest/node:${{ inputs.kind-node-version }} > "$LOGDIR/docker-kindest-node.log" 2>&1 &
+          PIDS[$!]="docker-kindest-node"
         fi
 
         # Extra Docker images
@@ -57,6 +61,7 @@ runs:
             if [ -n "$img" ]; then
               name=$(echo "$img" | sed 's|.*/||' | sed 's/:/-/g')
               docker pull "$img" > "$LOGDIR/docker-$name.log" 2>&1 &
+              PIDS[$!]="docker-$name"
             fi
           done < <(echo "${{ inputs.extra-docker-images }}" | tr ',' '\n')
         fi
@@ -85,8 +90,10 @@ runs:
                 echo "Verified: $full" >> "$LOGDIR/upbound-$img.log"
               else
                 echo "Error: Could not find tags for $base" > "$LOGDIR/upbound-$img.log"
+                exit 1
               fi
             ) &
+            PIDS[$!]="upbound-$img"
           done
         fi
 
@@ -97,6 +104,7 @@ runs:
             if [ -n "$img" ]; then
               name=$(echo "$img" | sed 's|.*/||' | sed 's/:/-/g')
               (crane digest "$img" > "$LOGDIR/oci-$name.log" 2>&1 && echo "Verified: $img" >> "$LOGDIR/oci-$name.log") &
+              PIDS[$!]="oci-$name"
             fi
           done < <(echo "${{ inputs.extra-oci-images }}" | tr ',' '\n')
         fi
@@ -109,6 +117,7 @@ runs:
             if [ -n "$pkg" ]; then
               name=$(echo "$pkg" | sed 's|.*/||' | sed 's/:/-/g')
               (crane digest "$pkg" > "$LOGDIR/function-$name.log" 2>&1 && echo "Verified: $pkg" >> "$LOGDIR/function-$name.log") &
+              PIDS[$!]="function-$name"
             fi
           done < <(yq -r '.spec.dependsOn[] | select(.kind == "Function") | .package + ":" + (.version | sub("^[>=<^~]+"; ""))' upbound.yaml 2>/dev/null)
 
@@ -118,6 +127,7 @@ runs:
             family_pkg=$(echo "$first_aws_pkg" | sed 's/provider-aws-[^:]*:/provider-family-aws:/')
             name=$(echo "$family_pkg" | sed 's|.*/||' | sed 's/:/-/g')
             (crane digest "$family_pkg" > "$LOGDIR/provider-$name.log" 2>&1 && echo "Verified: $family_pkg" >> "$LOGDIR/provider-$name.log") &
+            PIDS[$!]="provider-$name"
           fi
 
           # Pull providers (combine package + version, strip semver operators)
@@ -125,6 +135,7 @@ runs:
             if [ -n "$pkg" ]; then
               name=$(echo "$pkg" | sed 's|.*/||' | sed 's/:/-/g')
               (crane digest "$pkg" > "$LOGDIR/provider-$name.log" 2>&1 && echo "Verified: $pkg" >> "$LOGDIR/provider-$name.log") &
+              PIDS[$!]="provider-$name"
             fi
           done < <(yq -r '.spec.dependsOn[] | select(.kind == "Provider") | .package + ":" + (.version | sub("^[>=<^~]+"; ""))' upbound.yaml 2>/dev/null)
 
@@ -133,26 +144,45 @@ runs:
             if [ -n "$pkg" ]; then
               name=$(echo "$pkg" | sed 's|.*/||' | sed 's/:/-/g')
               (crane digest "$pkg" > "$LOGDIR/configuration-$name.log" 2>&1 && echo "Verified: $pkg" >> "$LOGDIR/configuration-$name.log") &
+              PIDS[$!]="configuration-$name"
             fi
           done < <(yq -r '.spec.dependsOn[] | select(.kind == "Configuration") | .package + ":" + (.version | sub("^[>=<^~]+"; ""))' upbound.yaml 2>/dev/null)
         fi
 
-        # Wait for all background pulls to complete
-        wait
+        # Wait for each process and track failures
+        FAILED=()
+        for pid in "${!PIDS[@]}"; do
+          if ! wait "$pid"; then
+            FAILED+=("${PIDS[$pid]}")
+          fi
+        done
 
         # Display organized logs
         echo ""
         echo "=== Pre-pull Results ==="
+        shopt -s nullglob
         for logfile in "$LOGDIR"/*.log; do
-          if [ -f "$logfile" ]; then
-            name=$(basename "$logfile" .log)
-            echo ""
-            echo "--- $name ---"
-            cat "$logfile"
-          fi
+          name=$(basename "$logfile" .log)
+          echo ""
+          echo "--- $name ---"
+          cat "$logfile"
         done
+        shopt -u nullglob
 
         # Cleanup
         rm -rf "$LOGDIR"
+
+        # Report failures and exit with error if any
+        if [ ${#FAILED[@]} -gt 0 ]; then
+          echo ""
+          echo "=== FAILED PROCESSES ==="
+          for name in "${FAILED[@]}"; do
+            echo "  - $name"
+          done
+          echo ""
+          echo "Pre-pull failed for ${#FAILED[@]} process(es)"
+          exit 1
+        fi
+
         echo ""
-        echo "All images verified/pre-pulled"
+        echo "All images verified/pre-pulled successfully"
