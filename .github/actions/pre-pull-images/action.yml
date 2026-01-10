@@ -138,7 +138,7 @@ runs:
 
           # Check if any provider-aws-* is used, if so pull provider-family-aws once
           echo "Parsing providers..."
-          first_aws_pkg=$(yq -r '.spec.dependsOn[] | select(.kind == "Provider") | .package + ":" + (.version | sub("^[>=<^~]+"; ""))' upbound.yaml 2>/dev/null | grep "provider-aws-" | head -1)
+          first_aws_pkg=$(yq -r '.spec.dependsOn[] | select(.kind == "Provider") | .package + ":" + (.version | sub("^[>=<^~]+"; ""))' upbound.yaml 2>/dev/null | grep "provider-aws-" | head -1 || true)
           if [ -n "$first_aws_pkg" ]; then
             family_pkg=$(echo "$first_aws_pkg" | sed 's/provider-aws-[^:]*:/provider-family-aws:/')
             echo "  Provider (family): $family_pkg"
