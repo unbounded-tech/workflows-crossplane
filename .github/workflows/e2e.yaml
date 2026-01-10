@@ -182,10 +182,10 @@ jobs:
           # Pull all images in parallel for faster startup
           echo "Pre-pulling Docker images in parallel..."
 
-          # Standard Docker images
+          # Standard Docker images (kindest/node is public on Docker Hub)
           docker pull kindest/node:v1.33.1 --quiet &
 
-          # Extract and pull function/provider packages from upbound.yaml using crane
+          # Extract and pull function/provider/configuration packages from upbound.yaml using crane
           if [ -f upbound.yaml ]; then
             echo "Pulling functions from upbound.yaml..."
             yq -r '.spec.dependsOn[] | select(.kind == "Function") | .package' upbound.yaml 2>/dev/null | while read pkg; do
@@ -196,9 +196,25 @@ jobs:
             done
 
             echo "Pulling providers from upbound.yaml..."
+            # Check if any provider-aws-* is used, if so pull provider-family-aws once
+            first_aws_pkg=$(yq -r '.spec.dependsOn[] | select(.kind == "Provider") | .package' upbound.yaml 2>/dev/null | grep "provider-aws-" | head -1)
+            if [ -n "$first_aws_pkg" ]; then
+              family_pkg=$(echo "$first_aws_pkg" | sed 's/provider-aws-[^:]*:/provider-family-aws:/')
+              echo "Pre-pulling provider-family-aws: $family_pkg"
+              crane pull "$family_pkg" /dev/null 2>/dev/null &
+            fi
+
             yq -r '.spec.dependsOn[] | select(.kind == "Provider") | .package' upbound.yaml 2>/dev/null | while read pkg; do
               if [ -n "$pkg" ]; then
                 echo "Pre-pulling provider: $pkg"
+                crane pull "$pkg" /dev/null 2>/dev/null &
+              fi
+            done
+
+            echo "Pulling configurations from upbound.yaml..."
+            yq -r '.spec.dependsOn[] | select(.kind == "Configuration") | .package' upbound.yaml 2>/dev/null | while read pkg; do
+              if [ -n "$pkg" ]; then
+                echo "Pre-pulling configuration: $pkg"
                 crane pull "$pkg" /dev/null 2>/dev/null &
               fi
             done
