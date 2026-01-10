@@ -67,7 +67,7 @@ on:
         default: 'us-east-1'
 
       debug-resource-types:
-        description: 'JSON array of resource types to print debug information for when tests fail (e.g., ["IdentityCenter.aws.platform.upbound.io", "Organization.aws.platform.upbound.io"])'
+        description: 'JSON array of resource types to debug and delete on test failure. These resources will be logged for debugging and deleted during cleanup to handle sibling resources not removed by cascade deletion (e.g., ["network.hops.ops.com.ai", "IdentityCenter.aws.platform.upbound.io"])'
         required: false
         type: string
 
@@ -403,21 +403,40 @@ jobs:
             echo "Test passed, skipping delete - when tests pass, resources should be cleaned up normally"
             exit 0
           fi
-          if [ -z "$ROOT_RESOURCE_TYPE" ]; then
-            echo "No root resource type discovered, skipping"
+          if [ -z "$ROOT_RESOURCE_TYPE" ] && [ -z "$DEBUG_TYPES" ]; then
+            echo "No resource types discovered, skipping"
             exit 0
           fi
           CLUSTER_NAME=$(kind get clusters | head -n1)
           kind export kubeconfig --name "$CLUSTER_NAME"
 
-          # Delete root composite resource (cascade will delete children)
-          echo "=== Deleting root resource ($ROOT_RESOURCE_TYPE) ==="
-          kubectl get "$ROOT_RESOURCE_TYPE" -n ${{ inputs.namespace }} --no-headers 2>/dev/null | awk '{print $1}' | while read -r name; do
-            if [ -n "$name" ]; then
-              echo "Deleting $ROOT_RESOURCE_TYPE/$name"
-              kubectl delete "$ROOT_RESOURCE_TYPE" "$name" -n ${{ inputs.namespace }} || true
-            fi
-          done
+          # Delete root composite resource first (cascade will delete children)
+          if [ -n "$ROOT_RESOURCE_TYPE" ]; then
+            echo "=== Deleting root resource ($ROOT_RESOURCE_TYPE) ==="
+            kubectl get "$ROOT_RESOURCE_TYPE" -n ${{ inputs.namespace }} --no-headers 2>/dev/null | awk '{print $1}' | while read -r name; do
+              if [ -n "$name" ]; then
+                echo "Deleting $ROOT_RESOURCE_TYPE/$name"
+                kubectl delete "$ROOT_RESOURCE_TYPE" "$name" -n ${{ inputs.namespace }} || true
+              fi
+            done
+          fi
+
+          # Delete all debug resource types (catches sibling resources not cleaned up by cascade)
+          if [ -n "$DEBUG_TYPES" ]; then
+            echo ""
+            echo "=== Deleting debug resource types ==="
+            echo "$DEBUG_TYPES" | tr ',' '\n' | while read -r resource_type; do
+              if [ -n "$resource_type" ] && [ "$resource_type" != "$ROOT_RESOURCE_TYPE" ]; then
+                echo "--- Checking $resource_type ---"
+                kubectl get "$resource_type" -n ${{ inputs.namespace }} --no-headers 2>/dev/null | awk '{print $1}' | while read -r name; do
+                  if [ -n "$name" ]; then
+                    echo "Deleting $resource_type/$name"
+                    kubectl delete "$resource_type" "$name" -n ${{ inputs.namespace }} || true
+                  fi
+                done
+              fi
+            done
+          fi
 
       - name: Wait for cleanup
         id: cleanup

@@ -218,6 +218,11 @@ A reusable workflow that runs end-to-end tests for Crossplane compositions using
 - `aws-role-arn` (optional): AWS IAM role ARN to assume via OIDC (overrides `aws-role-name` + `aws-account-id`)
 - `aws-account-id` (optional): AWS account ID used to build role ARN when `aws-role-arn` is not provided (quote values with leading zeros)
 - `aws-region` (optional): AWS region for OIDC credential configuration (default: `us-east-1`)
+- `debug-resource-types` (optional): JSON array of resource types to debug and delete on test failure. These resources will be logged for debugging and deleted during cleanup to handle sibling resources not removed by cascade deletion (e.g., `["network.hops.ops.com.ai"]`)
+- `debug-get-yaml` (optional): Show `kubectl get -o yaml` output for failed resources (default: `false`)
+- `debug-describe` (optional): Show `kubectl describe` output for failed resources (default: `true`)
+- `debug-usages` (optional): Show `kubectl get usages` output for debugging (default: `true`)
+- `namespace` (optional): Kubernetes namespace for test resources (default: `default`)
 
 #### Secrets
 
@@ -241,8 +246,8 @@ Requires the following permissions in the calling workflow:
 4. Logs into GitHub Container Registry
 5. Builds the project using `up` (Upbound CLI)
 6. Creates AWS credentials file (if `aws: true`)
-7. Creates ENV secrets for each environment variable
-8. Runs e2e tests using `up test run` with `--e2e` flag
+7. Runs e2e tests using `up test run` with `--e2e` flag
+8. On test failure: logs debug info and deletes root resource type plus all `debug-resource-types`
 9. Waits for managed resources to be cleaned up
 
 #### Usage
