@@ -191,7 +191,7 @@ jobs:
             yq -r '.spec.dependsOn[] | select(.kind == "Function") | .package' upbound.yaml 2>/dev/null | while read pkg; do
               if [ -n "$pkg" ]; then
                 echo "Pre-pulling function: $pkg"
-                crane pull "$pkg" /dev/null 2>/dev/null &
+                crane pull "$pkg" /dev/null &
               fi
             done
 
@@ -201,13 +201,13 @@ jobs:
             if [ -n "$first_aws_pkg" ]; then
               family_pkg=$(echo "$first_aws_pkg" | sed 's/provider-aws-[^:]*:/provider-family-aws:/')
               echo "Pre-pulling provider-family-aws: $family_pkg"
-              crane pull "$family_pkg" /dev/null 2>/dev/null &
+              crane pull "$family_pkg" /dev/null &
             fi
 
             yq -r '.spec.dependsOn[] | select(.kind == "Provider") | .package' upbound.yaml 2>/dev/null | while read pkg; do
               if [ -n "$pkg" ]; then
                 echo "Pre-pulling provider: $pkg"
-                crane pull "$pkg" /dev/null 2>/dev/null &
+                crane pull "$pkg" /dev/null &
               fi
             done
 
@@ -215,7 +215,7 @@ jobs:
             yq -r '.spec.dependsOn[] | select(.kind == "Configuration") | .package' upbound.yaml 2>/dev/null | while read pkg; do
               if [ -n "$pkg" ]; then
                 echo "Pre-pulling configuration: $pkg"
-                crane pull "$pkg" /dev/null 2>/dev/null &
+                crane pull "$pkg" /dev/null &
               fi
             done
           fi
