@@ -20,6 +20,12 @@ on:
         type: string
         default: 'tests/test*'
 
+      debug:
+        description: 'Enable debug output for up test command'
+        required: false
+        type: boolean
+        default: false
+
     secrets:
       GH_PAT:
         description: 'Token for ghcr.io package write access'
@@ -84,4 +90,4 @@ jobs:
 
       - name: Test
         run: |
-          up test run ${{ inputs.pattern }}
+          up test run ${{ inputs.pattern }} ${{ inputs.debug && '--debug' || '' }}
