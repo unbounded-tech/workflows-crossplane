@@ -161,6 +161,7 @@ jobs:
           crane pull xpkg.upbound.io/upbound/olareg:v0.1.2 /dev/null > "$LOGDIR/upbound-olareg.log" 2>&1 &
           crane pull xpkg.upbound.io/upbound/datamodel-code-generator:v0.31.2 /dev/null > "$LOGDIR/upbound-datamodel-code-generator.log" 2>&1 &
           crane pull xpkg.upbound.io/upbound/kcl:v0.11.2 /dev/null > "$LOGDIR/upbound-kcl.log" 2>&1 &
+          crane pull xpkg.upbound.io/upbound/function-go-templating-base:v0.9.0-13-gd1fa2e3 /dev/null > "$LOGDIR/upbound-function-go-templating-base.log" 2>&1 &
 
           # Extract and pull function/provider/configuration packages from upbound.yaml using crane
           if [ -f upbound.yaml ]; then
