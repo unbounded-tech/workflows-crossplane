@@ -169,20 +169,29 @@ runs:
         done
         shopt -u nullglob
 
-        # Cleanup
-        rm -rf "$LOGDIR"
-
         # Report failures and exit with error if any
         if [ ${#FAILED[@]} -gt 0 ]; then
           echo ""
           echo "=== FAILED PROCESSES ==="
           for name in "${FAILED[@]}"; do
-            echo "  - $name"
+            echo ""
+            echo "  FAILED: $name"
+            logfile="$LOGDIR/$name.log"
+            if [ -f "$logfile" ]; then
+              echo "  Log output:"
+              sed 's/^/    /' "$logfile"
+            else
+              echo "  (no log file found)"
+            fi
           done
           echo ""
           echo "Pre-pull failed for ${#FAILED[@]} process(es)"
+          rm -rf "$LOGDIR"
           exit 1
         fi
+
+        # Cleanup
+        rm -rf "$LOGDIR"
 
         echo ""
         echo "All images verified/pre-pulled successfully"
