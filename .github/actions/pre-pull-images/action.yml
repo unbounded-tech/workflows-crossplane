@@ -40,6 +40,18 @@ runs:
     - name: Pre-pull images
       shell: bash
       run: |
+        set -euo pipefail
+
+        # Error handler
+        error_handler() {
+          local line=$1
+          local cmd=$2
+          echo ""
+          echo "ERROR: Command failed at line $line: $cmd"
+          echo ""
+        }
+        trap 'error_handler ${LINENO} "$BASH_COMMAND"' ERR
+
         echo "Pre-pulling Docker/OCI images in parallel..."
 
         # Create temp directory for logs
@@ -111,10 +123,13 @@ runs:
 
         # Extract and pull function/provider/configuration packages from upbound.yaml
         if [ "${{ inputs.from-upbound-yaml }}" = "true" ] && [ -f upbound.yaml ]; then
+          echo "Found upbound.yaml, parsing dependencies..."
+
           # Pull functions (combine package + version, strip semver operators)
-          # Use process substitution to avoid subshell issues with background jobs
+          echo "Parsing functions..."
           while read pkg; do
             if [ -n "$pkg" ]; then
+              echo "  Function: $pkg"
               name=$(echo "$pkg" | sed 's|.*/||' | sed 's/:/-/g')
               (crane digest "$pkg" > "$LOGDIR/function-$name.log" 2>&1 && echo "Verified: $pkg" >> "$LOGDIR/function-$name.log") &
               PIDS[$!]="function-$name"
@@ -122,9 +137,11 @@ runs:
           done < <(yq -r '.spec.dependsOn[] | select(.kind == "Function") | .package + ":" + (.version | sub("^[>=<^~]+"; ""))' upbound.yaml 2>/dev/null)
 
           # Check if any provider-aws-* is used, if so pull provider-family-aws once
+          echo "Parsing providers..."
           first_aws_pkg=$(yq -r '.spec.dependsOn[] | select(.kind == "Provider") | .package + ":" + (.version | sub("^[>=<^~]+"; ""))' upbound.yaml 2>/dev/null | grep "provider-aws-" | head -1)
           if [ -n "$first_aws_pkg" ]; then
             family_pkg=$(echo "$first_aws_pkg" | sed 's/provider-aws-[^:]*:/provider-family-aws:/')
+            echo "  Provider (family): $family_pkg"
             name=$(echo "$family_pkg" | sed 's|.*/||' | sed 's/:/-/g')
             (crane digest "$family_pkg" > "$LOGDIR/provider-$name.log" 2>&1 && echo "Verified: $family_pkg" >> "$LOGDIR/provider-$name.log") &
             PIDS[$!]="provider-$name"
@@ -133,6 +150,7 @@ runs:
           # Pull providers (combine package + version, strip semver operators)
           while read pkg; do
             if [ -n "$pkg" ]; then
+              echo "  Provider: $pkg"
               name=$(echo "$pkg" | sed 's|.*/||' | sed 's/:/-/g')
               (crane digest "$pkg" > "$LOGDIR/provider-$name.log" 2>&1 && echo "Verified: $pkg" >> "$LOGDIR/provider-$name.log") &
               PIDS[$!]="provider-$name"
@@ -140,22 +158,29 @@ runs:
           done < <(yq -r '.spec.dependsOn[] | select(.kind == "Provider") | .package + ":" + (.version | sub("^[>=<^~]+"; ""))' upbound.yaml 2>/dev/null)
 
           # Pull configurations (combine package + version, strip semver operators)
+          echo "Parsing configurations..."
           while read pkg; do
             if [ -n "$pkg" ]; then
+              echo "  Configuration: $pkg"
               name=$(echo "$pkg" | sed 's|.*/||' | sed 's/:/-/g')
               (crane digest "$pkg" > "$LOGDIR/configuration-$name.log" 2>&1 && echo "Verified: $pkg" >> "$LOGDIR/configuration-$name.log") &
               PIDS[$!]="configuration-$name"
             fi
           done < <(yq -r '.spec.dependsOn[] | select(.kind == "Configuration") | .package + ":" + (.version | sub("^[>=<^~]+"; ""))' upbound.yaml 2>/dev/null)
+
+          echo "Starting ${#PIDS[@]} background jobs..."
         fi
 
         # Wait for each process and track failures
+        # Disable errexit temporarily for wait loop
         FAILED=()
+        set +e
         for pid in "${!PIDS[@]}"; do
           if ! wait "$pid"; then
             FAILED+=("${PIDS[$pid]}")
           fi
         done
+        set -e
 
         # Display organized logs
         echo ""
