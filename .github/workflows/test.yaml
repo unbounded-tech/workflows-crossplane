@@ -77,7 +77,7 @@ jobs:
           password: ${{ github.token }}
 
       - name: Pre-pull OCI images
-        uses: ./.github/actions/pre-pull-images
+        uses: unbounded-tech/workflows-crossplane/.github/actions/pre-pull-images@feat/cache
 
       - name: Build with up
         uses: upbound/action-up-project@v1.1.2
