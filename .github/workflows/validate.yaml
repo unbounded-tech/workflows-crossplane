@@ -145,38 +145,78 @@ jobs:
           curl -sL "https://github.com/google/go-containerregistry/releases/download/${CRANE_VERSION}/go-containerregistry_Linux_x86_64.tar.gz" | tar -xzf - crane
           sudo mv crane /usr/local/bin/
 
-      # - name: Pre-pull Docker images
-      #   run: |
-      #     # Pre-pull images used by `up` CLI to prevent timeout issues
-      #     # Pull all images in parallel for faster startup
-      #     echo "Pre-pulling Docker images in parallel..."
+      - name: Pre-pull Docker images
+        run: |
+          # Pre-pull images used by `up` CLI to prevent timeout issues
+          # Pull all images in parallel for faster startup
+          echo "Pre-pulling Docker images in parallel..."
 
-      #     # Standard Docker images
-      #     docker pull kindest/node:v1.33.1 --quiet &
+          # Create temp directory for logs
+          LOGDIR=$(mktemp -d)
 
-      #     # Extract and pull function/provider packages from upbound.yaml using crane
-      #     if [ -f upbound.yaml ]; then
-      #       echo "Pulling functions from upbound.yaml..."
-      #       yq -r '.spec.dependsOn[] | select(.kind == "Function") | .package' upbound.yaml 2>/dev/null | while read pkg; do
-      #         if [ -n "$pkg" ]; then
-      #           echo "Pre-pulling function: $pkg"
-      #           crane pull "$pkg" /dev/null 2>/dev/null &
-      #         fi
-      #       done
+          # Standard Docker images (kindest/node is public on Docker Hub)
+          docker pull kindest/node:v1.33.1 > "$LOGDIR/docker-kindest-node.log" 2>&1 &
 
-      #       echo "Pulling providers from upbound.yaml..."
-      #       yq -r '.spec.dependsOn[] | select(.kind == "Provider") | .package' upbound.yaml 2>/dev/null | while read pkg; do
-      #         if [ -n "$pkg" ]; then
-      #           echo "Pre-pulling provider: $pkg"
-      #           crane pull "$pkg" /dev/null 2>/dev/null &
-      #         fi
-      #       done
-      #     fi
+          # Upbound internal images used by `up` CLI (from xpkg.upbound.io)
+          crane pull xpkg.upbound.io/upbound/olareg:v0.1.2 /dev/null > "$LOGDIR/upbound-olareg.log" 2>&1 &
+          crane pull xpkg.upbound.io/upbound/datamodel-code-generator:v0.31.2 /dev/null > "$LOGDIR/upbound-datamodel-code-generator.log" 2>&1 &
+          crane pull xpkg.upbound.io/upbound/kcl:v0.11.2 /dev/null > "$LOGDIR/upbound-kcl.log" 2>&1 &
 
-      #     # Wait for all background pulls to complete
-      #     wait
-      #     echo "All images pre-pulled"
-      #   timeout-minutes: 5
+          # Extract and pull function/provider/configuration packages from upbound.yaml using crane
+          if [ -f upbound.yaml ]; then
+            # Pull functions
+            yq -r '.spec.dependsOn[] | select(.kind == "Function") | .package' upbound.yaml 2>/dev/null | while read pkg; do
+              if [ -n "$pkg" ]; then
+                name=$(echo "$pkg" | sed 's|.*/||' | sed 's/:/-/g')
+                crane pull "$pkg" /dev/null > "$LOGDIR/function-$name.log" 2>&1 &
+              fi
+            done
+
+            # Check if any provider-aws-* is used, if so pull provider-family-aws once
+            first_aws_pkg=$(yq -r '.spec.dependsOn[] | select(.kind == "Provider") | .package' upbound.yaml 2>/dev/null | grep "provider-aws-" | head -1)
+            if [ -n "$first_aws_pkg" ]; then
+              family_pkg=$(echo "$first_aws_pkg" | sed 's/provider-aws-[^:]*:/provider-family-aws:/')
+              name=$(echo "$family_pkg" | sed 's|.*/||' | sed 's/:/-/g')
+              crane pull "$family_pkg" /dev/null > "$LOGDIR/provider-$name.log" 2>&1 &
+            fi
+
+            # Pull providers
+            yq -r '.spec.dependsOn[] | select(.kind == "Provider") | .package' upbound.yaml 2>/dev/null | while read pkg; do
+              if [ -n "$pkg" ]; then
+                name=$(echo "$pkg" | sed 's|.*/||' | sed 's/:/-/g')
+                crane pull "$pkg" /dev/null > "$LOGDIR/provider-$name.log" 2>&1 &
+              fi
+            done
+
+            # Pull configurations
+            yq -r '.spec.dependsOn[] | select(.kind == "Configuration") | .package' upbound.yaml 2>/dev/null | while read pkg; do
+              if [ -n "$pkg" ]; then
+                name=$(echo "$pkg" | sed 's|.*/||' | sed 's/:/-/g')
+                crane pull "$pkg" /dev/null > "$LOGDIR/configuration-$name.log" 2>&1 &
+              fi
+            done
+          fi
+
+          # Wait for all background pulls to complete
+          wait
+
+          # Display organized logs
+          echo ""
+          echo "=== Pre-pull Results ==="
+          for logfile in "$LOGDIR"/*.log; do
+            if [ -f "$logfile" ]; then
+              name=$(basename "$logfile" .log)
+              echo ""
+              echo "--- $name ---"
+              cat "$logfile"
+            fi
+          done
+
+          # Cleanup
+          rm -rf "$LOGDIR"
+          echo ""
+          echo "All images pre-pulled"
+        timeout-minutes: 5
 
       - name: Render Example
         run: |
