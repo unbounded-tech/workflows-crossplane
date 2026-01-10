@@ -41,6 +41,7 @@ jobs:
           path: |
             ~/.crossplane/cache
             ~/.up/cache
+            ~/.up/build-cache
           key: ${{ runner.os }}-crossplane-${{ hashFiles('**/upbound.yaml','**/definition.yaml') }}-
 
       - name: Install & login with up
@@ -80,6 +81,33 @@ jobs:
         uses: upbound/action-up-project@v1.1.2
         with:
           skip-login-check: true
+
+      # - name: Pre-pull Docker images
+      #   run: |
+      #     # Pre-pull images used by `up` CLI to prevent timeout issues
+      #     # Pull all images in parallel for faster startup
+      #     echo "Pre-pulling Docker images in parallel..."
+
+      #     # Infrastructure images used by up CLI
+      #     docker pull upbound/olareg:v0.1.2 --quiet &
+      #     docker pull kindest/node:v1.33.1 --quiet &
+      #     docker pull upbound/datamodel-code-generator:v0.31.2 --quiet &
+      #     docker pull upbound/kcl:v0.11.2 --quiet &
+
+      #     # Extract and pull function packages from upbound.yaml
+      #     if [ -f upbound.yaml ]; then
+      #       yq -r '.spec.dependsOn[] | select(.kind == "Function") | .package' upbound.yaml 2>/dev/null | while read pkg; do
+      #         if [ -n "$pkg" ]; then
+      #           echo "Pre-pulling function: $pkg"
+      #           docker pull "$pkg" --quiet &
+      #         fi
+      #       done
+      #     fi
+
+      #     # Wait for all background pulls to complete
+      #     wait
+      #     echo "All Docker images pre-pulled"
+      #   timeout-minutes: 5
 
       - name: Publish
         uses: upbound/action-up-project@v1.1.2
