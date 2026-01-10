@@ -91,12 +91,11 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v6
 
-      - name: Cache upbound + crossplane
+      - name: Cache crossplane
         uses: actions/cache@v5
         with:
           path: |
             ~/.crossplane/cache
-            ~/.up/cache
           key: ${{ runner.os }}-crossplane-${{ hashFiles('**/upbound.yaml','**/definition.yaml') }}-
 
       - name: Install & login with up
