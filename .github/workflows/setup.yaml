@@ -1,0 +1,77 @@
+name: setup
+
+on:
+  workflow_call:
+    inputs:
+      ghcr_user:
+        description: 'ghcr user'
+        required: false
+        type: string
+
+      crossplane_version:
+        description: 'Crossplane CLI version to install'
+        required: false
+        type: string
+        default: 'v2.0.2'
+
+    secrets:
+      GH_PAT:
+        description: 'Token for ghcr.io package write access'
+        required: false
+
+permissions:
+  contents: read
+  packages: read
+
+jobs:
+  setup:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Cache upbound + crossplane
+        uses: actions/cache@v5
+        with:
+          path: |
+            ~/.crossplane/cache
+            ~/.up/cache
+          key: ${{ runner.os }}-crossplane-${{ hashFiles('**/upbound.yaml','**/definition.yaml') }}-
+
+      - name: Install & login with up
+        uses: upbound/action-up@v1.0.0
+        with:
+          skip-login: true
+
+      - name: Install Crossplane CLI
+        run: |
+          curl -sL https://raw.githubusercontent.com/crossplane/crossplane/master/install.sh \
+            | XP_VERSION=${{ inputs.crossplane_version }} sh
+
+      - name: check for GH_PAT if ghcr_user is set
+        if: inputs.ghcr_user
+        run: |
+          if [ -z "${{ secrets.GH_PAT }}" ]; then
+            echo "GH_PAT secret must be set if ghcr_user is set"
+            exit 1
+          fi
+
+      - name: Docker login to GHCR
+        if: inputs.ghcr_user
+        uses: docker/login-action@v3.6.0
+        with:
+          registry: ghcr.io
+          username: ${{ inputs.ghcr_user }}
+          password: ${{ secrets.GH_PAT }}
+
+      - name: Docker login to GHCR
+        uses: docker/login-action@v3.6.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+
+      - name: Build with up
+        uses: upbound/action-up-project@v1.1.2
+        with:
+          skip-login-check: true

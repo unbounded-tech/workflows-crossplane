@@ -4,6 +4,91 @@ This repository contains shared GitHub Actions workflows for Crossplane projects
 
 ## Workflows
 
+### Setup (`setup.yaml`)
+
+A reusable workflow that performs the common setup and build steps shared by all other workflows. Running this workflow first populates the cache, allowing dependent workflows to skip redundant setup work.
+
+#### Purpose
+
+When running multiple workflows (validate, test, e2e, publish) in parallel, each would independently perform the same setup steps: checkout, install tools, authenticate, and build. This duplicates work up to 10x depending on how many workflows run concurrently.
+
+By calling `setup` first and making other workflows depend on it via `needs`, the cache is populated once and shared across all subsequent jobs. This significantly reduces total CI time and resource usage.
+
+#### Inputs
+
+- `crossplane_version` (optional): Crossplane CLI version to install (default: `v2.0.2`)
+- `ghcr_user` (optional): GitHub Container Registry username for pulling images
+
+#### Secrets
+
+- `GH_PAT` (optional): Personal access token for GitHub Container Registry access (required if `ghcr_user` is provided)
+
+#### Permissions
+
+Requires the following permissions in the calling workflow:
+- `packages: read` (for GHCR access)
+- `contents: read` (for checking out code)
+
+#### What It Does
+
+1. Checks out the repository
+2. Restores/creates cache for Upbound and Crossplane CLI
+3. Installs and configures the Upbound CLI
+4. Installs Crossplane CLI
+5. Authenticates with GitHub Container Registry
+6. Builds the project using `up` (populating the cache for dependent workflows)
+
+#### Usage
+
+Call `setup` first, then have other workflows depend on it:
+
+```yaml
+name: CI
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+  packages: read
+
+jobs:
+  setup:
+    uses: unbounded-tech/workflows-crossplane/.github/workflows/setup.yaml@main
+    secrets:
+      GH_PAT: ${{ secrets.GH_PAT }}
+
+  validate:
+    needs: setup
+    uses: unbounded-tech/workflows-crossplane/.github/workflows/validate.yaml@main
+    with:
+      examples: '[{"example": "examples/claim.yaml"}]'
+      api_path: 'apis/myapi'
+    secrets:
+      GH_PAT: ${{ secrets.GH_PAT }}
+
+  test:
+    needs: setup
+    uses: unbounded-tech/workflows-crossplane/.github/workflows/test.yaml@main
+    secrets:
+      GH_PAT: ${{ secrets.GH_PAT }}
+
+  e2e:
+    needs: setup
+    uses: unbounded-tech/workflows-crossplane/.github/workflows/e2e.yaml@main
+    with:
+      aws: true
+      aws-use-oidc: true
+      aws-account-id: "123456789012"
+    secrets:
+      GH_PAT: ${{ secrets.GH_PAT }}
+```
+
+In this example, `setup` runs first and populates the cache. Then `validate`, `test`, and `e2e` run in parallel, each benefiting from the pre-warmed cache instead of duplicating the build step.
+
 ### Validate (`validate.yaml`)
 
 A reusable workflow that validates Crossplane compositions and examples using the Upbound CLI and Crossplane beta validate command.
