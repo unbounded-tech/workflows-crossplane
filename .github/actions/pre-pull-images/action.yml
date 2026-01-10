@@ -1,5 +1,5 @@
 name: 'Pre-pull OCI Images'
-description: 'Pre-pull Docker and OCI images used by Crossplane/Upbound tooling'
+description: 'Pre-pull Docker and OCI images used by Crossplane/Upbound tooling with caching'
 
 inputs:
   kind-node:
@@ -26,19 +26,60 @@ inputs:
     description: 'Comma-separated list of additional OCI images to pull with crane'
     required: false
     default: ''
+  cache-key-prefix:
+    description: 'Prefix for cache key (allows different caches per workflow)'
+    required: false
+    default: 'oci-images'
+
+outputs:
+  cache-hit:
+    description: 'Whether the cache was hit'
+    value: ${{ steps.cache.outputs.cache-hit }}
+  cache-path:
+    description: 'Path to the OCI cache directory'
+    value: ${{ steps.setup.outputs.cache-path }}
 
 runs:
   using: 'composite'
   steps:
+    - name: Setup cache directory
+      id: setup
+      shell: bash
+      run: |
+        CACHE_DIR="$HOME/.oci-cache"
+        mkdir -p "$CACHE_DIR"
+        echo "cache-path=$CACHE_DIR" >> $GITHUB_OUTPUT
+
+        # Generate cache key from upbound.yaml if it exists
+        if [ -f upbound.yaml ]; then
+          HASH=$(sha256sum upbound.yaml | cut -d' ' -f1 | head -c 16)
+        else
+          HASH="no-upbound-yaml"
+        fi
+        echo "hash=$HASH" >> $GITHUB_OUTPUT
+
+    - name: Restore OCI cache
+      id: cache
+      uses: actions/cache@v4
+      with:
+        path: ${{ steps.setup.outputs.cache-path }}
+        key: ${{ inputs.cache-key-prefix }}-${{ runner.os }}-${{ steps.setup.outputs.hash }}
+        restore-keys: |
+          ${{ inputs.cache-key-prefix }}-${{ runner.os }}-
+
     - name: Install crane
       shell: bash
       run: |
-        CRANE_VERSION="v0.20.2"
-        curl -sL "https://github.com/google/go-containerregistry/releases/download/${CRANE_VERSION}/go-containerregistry_Linux_x86_64.tar.gz" | tar -xzf - crane
-        sudo mv crane /usr/local/bin/
+        if ! command -v crane &> /dev/null; then
+          CRANE_VERSION="v0.20.2"
+          curl -sL "https://github.com/google/go-containerregistry/releases/download/${CRANE_VERSION}/go-containerregistry_Linux_x86_64.tar.gz" | tar -xzf - crane
+          sudo mv crane /usr/local/bin/
+        fi
 
     - name: Pre-pull images
       shell: bash
+      env:
+        CACHE_DIR: ${{ steps.setup.outputs.cache-path }}
       run: |
         set -euo pipefail
 
@@ -53,12 +94,47 @@ runs:
         trap 'error_handler ${LINENO} "$BASH_COMMAND"' ERR
 
         echo "Pre-pulling Docker/OCI images in parallel..."
+        echo "Cache directory: $CACHE_DIR"
 
         # Create temp directory for logs
         LOGDIR=$(mktemp -d)
 
         # Track PIDs and their descriptions
         declare -A PIDS
+
+        # Helper function to pull OCI image with caching
+        pull_oci_image() {
+          local img="$1"
+          local logfile="$2"
+          local cache_file="$CACHE_DIR/$(echo "$img" | sed 's|/|_|g; s/:/_/g').tar"
+
+          # Check if already cached
+          if [ -f "$cache_file" ]; then
+            echo "Cache hit: $img" > "$logfile"
+            echo "Cached at: $cache_file" >> "$logfile"
+            # Verify the cached image is still valid
+            if crane digest "$img" >> "$logfile" 2>&1; then
+              echo "Verified: $img" >> "$logfile"
+              return 0
+            else
+              echo "Cache stale, re-pulling..." >> "$logfile"
+              rm -f "$cache_file"
+            fi
+          fi
+
+          # Pull the image
+          echo "Pulling: $img" >> "$logfile"
+          if crane digest "$img" >> "$logfile" 2>&1; then
+            if crane pull "$img" "$cache_file" >> "$logfile" 2>&1; then
+              echo "Cached to: $cache_file" >> "$logfile"
+              echo "Verified: $img" >> "$logfile"
+              return 0
+            fi
+          fi
+          return 1
+        }
+        export -f pull_oci_image
+        export CACHE_DIR
 
         # Kind node (Docker image)
         if [ "${{ inputs.kind-node }}" = "true" ]; then
@@ -84,6 +160,8 @@ runs:
           for img in olareg datamodel-code-generator kcl function-go-templating-base; do
             (
               base="xpkg.upbound.io/upbound/$img"
+              logfile="$LOGDIR/upbound-$img.log"
+
               # Get all semver tags sorted
               all_tags=$(crane ls "$base" 2>/dev/null | grep -E '^v[0-9]' | sort -V)
               if [ -z "$all_tags" ]; then
@@ -96,12 +174,11 @@ runs:
 
               if [ -n "$tag" ]; then
                 full="$base:$tag"
-                echo "Recent versions: $recent" > "$LOGDIR/upbound-$img.log"
-                echo "Selected: $tag" >> "$LOGDIR/upbound-$img.log"
-                crane digest "$full" >> "$LOGDIR/upbound-$img.log" 2>&1
-                echo "Verified: $full" >> "$LOGDIR/upbound-$img.log"
+                echo "Recent versions: $recent" > "$logfile"
+                echo "Selected: $tag" >> "$logfile"
+                pull_oci_image "$full" "$logfile"
               else
-                echo "Error: Could not find tags for $base" > "$LOGDIR/upbound-$img.log"
+                echo "Error: Could not find tags for $base" > "$logfile"
                 exit 1
               fi
             ) &
@@ -115,7 +192,7 @@ runs:
             img=$(echo "$img" | xargs)  # trim whitespace
             if [ -n "$img" ]; then
               name=$(echo "$img" | sed 's|.*/||' | sed 's/:/-/g')
-              (crane digest "$img" > "$LOGDIR/oci-$name.log" 2>&1 && echo "Verified: $img" >> "$LOGDIR/oci-$name.log") &
+              (pull_oci_image "$img" "$LOGDIR/oci-$name.log") &
               PIDS[$!]="oci-$name"
             fi
           done < <(echo "${{ inputs.extra-oci-images }}" | tr ',' '\n')
@@ -131,7 +208,7 @@ runs:
             if [ -n "$pkg" ]; then
               echo "  Function: $pkg"
               name=$(echo "$pkg" | sed 's|.*/||' | sed 's/:/-/g')
-              (crane digest "$pkg" > "$LOGDIR/function-$name.log" 2>&1 && echo "Verified: $pkg" >> "$LOGDIR/function-$name.log") &
+              (pull_oci_image "$pkg" "$LOGDIR/function-$name.log") &
               PIDS[$!]="function-$name"
             fi
           done < <(yq -r '.spec.dependsOn[] | select(.kind == "Function") | .package + ":" + (.version | sub("^[>=<^~]+"; ""))' upbound.yaml 2>/dev/null)
@@ -143,7 +220,7 @@ runs:
             family_pkg=$(echo "$first_aws_pkg" | sed 's/provider-aws-[^:]*:/provider-family-aws:/')
             echo "  Provider (family): $family_pkg"
             name=$(echo "$family_pkg" | sed 's|.*/||' | sed 's/:/-/g')
-            (crane digest "$family_pkg" > "$LOGDIR/provider-$name.log" 2>&1 && echo "Verified: $family_pkg" >> "$LOGDIR/provider-$name.log") &
+            (pull_oci_image "$family_pkg" "$LOGDIR/provider-$name.log") &
             PIDS[$!]="provider-$name"
           fi
 
@@ -152,7 +229,7 @@ runs:
             if [ -n "$pkg" ]; then
               echo "  Provider: $pkg"
               name=$(echo "$pkg" | sed 's|.*/||' | sed 's/:/-/g')
-              (crane digest "$pkg" > "$LOGDIR/provider-$name.log" 2>&1 && echo "Verified: $pkg" >> "$LOGDIR/provider-$name.log") &
+              (pull_oci_image "$pkg" "$LOGDIR/provider-$name.log") &
               PIDS[$!]="provider-$name"
             fi
           done < <(yq -r '.spec.dependsOn[] | select(.kind == "Provider") | .package + ":" + (.version | sub("^[>=<^~]+"; ""))' upbound.yaml 2>/dev/null)
@@ -163,7 +240,7 @@ runs:
             if [ -n "$pkg" ]; then
               echo "  Configuration: $pkg"
               name=$(echo "$pkg" | sed 's|.*/||' | sed 's/:/-/g')
-              (crane digest "$pkg" > "$LOGDIR/configuration-$name.log" 2>&1 && echo "Verified: $pkg" >> "$LOGDIR/configuration-$name.log") &
+              (pull_oci_image "$pkg" "$LOGDIR/configuration-$name.log") &
               PIDS[$!]="configuration-$name"
             fi
           done < <(yq -r '.spec.dependsOn[] | select(.kind == "Configuration") | .package + ":" + (.version | sub("^[>=<^~]+"; ""))' upbound.yaml 2>/dev/null)
@@ -194,6 +271,15 @@ runs:
         done
         shopt -u nullglob
 
+        # Show cache stats
+        echo ""
+        echo "=== Cache Stats ==="
+        echo "Cache directory: $CACHE_DIR"
+        if [ -d "$CACHE_DIR" ]; then
+          echo "Cached images: $(ls -1 "$CACHE_DIR"/*.tar 2>/dev/null | wc -l || echo 0)"
+          echo "Cache size: $(du -sh "$CACHE_DIR" 2>/dev/null | cut -f1 || echo "0")"
+        fi
+
         # Report failures and exit with error if any
         if [ ${#FAILED[@]} -gt 0 ]; then
           echo ""
@@ -215,7 +301,7 @@ runs:
           exit 1
         fi
 
-        # Cleanup
+        # Cleanup logs
         rm -rf "$LOGDIR"
 
         echo ""
