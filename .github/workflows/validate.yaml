@@ -96,8 +96,6 @@ jobs:
         with:
           path: |
             ~/.crossplane/cache
-            ~/.up/cache
-            ~/.up/build-cache
           key: ${{ runner.os }}-crossplane-${{ hashFiles('**/upbound.yaml','**/definition.yaml') }}-
 
       - name: Install & login with up
@@ -133,87 +131,8 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ github.token }}
 
-      - name: Install crane
-        run: |
-          # Install crane for pulling OCI packages
-          CRANE_VERSION="v0.20.2"
-          curl -sL "https://github.com/google/go-containerregistry/releases/download/${CRANE_VERSION}/go-containerregistry_Linux_x86_64.tar.gz" | tar -xzf - crane
-          sudo mv crane /usr/local/bin/
-
-      - name: Pre-pull Docker images
-        run: |
-          # Pre-pull images used by `up` CLI to prevent timeout issues
-          # Pull all images in parallel for faster startup
-          echo "Pre-pulling Docker images in parallel..."
-
-          # Create temp directory for logs
-          LOGDIR=$(mktemp -d)
-
-          # Standard Docker images (kindest/node is public on Docker Hub)
-          docker pull kindest/node:v1.33.1 > "$LOGDIR/docker-kindest-node.log" 2>&1 &
-
-          # Upbound internal images used by `up` CLI (from xpkg.upbound.io)
-          (crane digest xpkg.upbound.io/upbound/olareg:v0.1.2 > "$LOGDIR/upbound-olareg.log" 2>&1 && echo "Pulled: xpkg.upbound.io/upbound/olareg:v0.1.2" >> "$LOGDIR/upbound-olareg.log") &
-          (crane digest xpkg.upbound.io/upbound/datamodel-code-generator:v0.31.2 > "$LOGDIR/upbound-datamodel-code-generator.log" 2>&1 && echo "Pulled: xpkg.upbound.io/upbound/datamodel-code-generator:v0.31.2" >> "$LOGDIR/upbound-datamodel-code-generator.log") &
-          (crane digest xpkg.upbound.io/upbound/kcl:v0.11.2 > "$LOGDIR/upbound-kcl.log" 2>&1 && echo "Pulled: xpkg.upbound.io/upbound/kcl:v0.11.2" >> "$LOGDIR/upbound-kcl.log") &
-          (crane digest xpkg.upbound.io/upbound/function-go-templating-base:v0.9.0-13-gd1fa2e3 > "$LOGDIR/upbound-function-go-templating-base.log" 2>&1 && echo "Pulled: xpkg.upbound.io/upbound/function-go-templating-base:v0.9.0-13-gd1fa2e3" >> "$LOGDIR/upbound-function-go-templating-base.log") &
-
-          # Extract and pull function/provider/configuration packages from upbound.yaml using crane
-          # Note: upbound.yaml has package and version as separate fields, version may have semver operators like >=
-          if [ -f upbound.yaml ]; then
-            # Pull functions (combine package + version, strip semver operators)
-            yq -r '.spec.dependsOn[] | select(.kind == "Function") | .package + ":" + (.version | sub("^[>=<^~]+"; ""))' upbound.yaml 2>/dev/null | while read pkg; do
-              if [ -n "$pkg" ]; then
-                name=$(echo "$pkg" | sed 's|.*/||' | sed 's/:/-/g')
-                (crane digest "$pkg" > "$LOGDIR/function-$name.log" 2>&1 && echo "Pulled: $pkg" >> "$LOGDIR/function-$name.log") &
-              fi
-            done
-
-            # Check if any provider-aws-* is used, if so pull provider-family-aws once
-            first_aws_pkg=$(yq -r '.spec.dependsOn[] | select(.kind == "Provider") | .package + ":" + (.version | sub("^[>=<^~]+"; ""))' upbound.yaml 2>/dev/null | grep "provider-aws-" | head -1)
-            if [ -n "$first_aws_pkg" ]; then
-              family_pkg=$(echo "$first_aws_pkg" | sed 's/provider-aws-[^:]*:/provider-family-aws:/')
-              name=$(echo "$family_pkg" | sed 's|.*/||' | sed 's/:/-/g')
-              (crane digest "$family_pkg" > "$LOGDIR/provider-$name.log" 2>&1 && echo "Pulled: $family_pkg" >> "$LOGDIR/provider-$name.log") &
-            fi
-
-            # Pull providers (combine package + version, strip semver operators)
-            yq -r '.spec.dependsOn[] | select(.kind == "Provider") | .package + ":" + (.version | sub("^[>=<^~]+"; ""))' upbound.yaml 2>/dev/null | while read pkg; do
-              if [ -n "$pkg" ]; then
-                name=$(echo "$pkg" | sed 's|.*/||' | sed 's/:/-/g')
-                (crane digest "$pkg" > "$LOGDIR/provider-$name.log" 2>&1 && echo "Pulled: $pkg" >> "$LOGDIR/provider-$name.log") &
-              fi
-            done
-
-            # Pull configurations (combine package + version, strip semver operators)
-            yq -r '.spec.dependsOn[] | select(.kind == "Configuration") | .package + ":" + (.version | sub("^[>=<^~]+"; ""))' upbound.yaml 2>/dev/null | while read pkg; do
-              if [ -n "$pkg" ]; then
-                name=$(echo "$pkg" | sed 's|.*/||' | sed 's/:/-/g')
-                (crane digest "$pkg" > "$LOGDIR/configuration-$name.log" 2>&1 && echo "Pulled: $pkg" >> "$LOGDIR/configuration-$name.log") &
-              fi
-            done
-          fi
-
-          # Wait for all background pulls to complete
-          wait
-
-          # Display organized logs
-          echo ""
-          echo "=== Pre-pull Results ==="
-          for logfile in "$LOGDIR"/*.log; do
-            if [ -f "$logfile" ]; then
-              name=$(basename "$logfile" .log)
-              echo ""
-              echo "--- $name ---"
-              cat "$logfile"
-            fi
-          done
-
-          # Cleanup
-          rm -rf "$LOGDIR"
-          echo ""
-          echo "All images pre-pulled"
-        timeout-minutes: 5
+      - name: Pre-pull OCI images
+        uses: ./.github/actions/pre-pull-images
 
       - name: Build with up
         uses: upbound/action-up-project@v1.1.2

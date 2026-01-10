@@ -40,8 +40,6 @@ jobs:
         with:
           path: |
             ~/.crossplane/cache
-            ~/.up/cache
-            ~/.up/build-cache
           key: ${{ runner.os }}-crossplane-${{ hashFiles('**/upbound.yaml','**/definition.yaml') }}-
 
       - name: Install & login with up
@@ -77,50 +75,15 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ github.token }}
 
+      - name: Pre-pull OCI images
+        uses: ./.github/actions/pre-pull-images
+        with:
+          pull-kind-node: 'false'
+
       - name: Build with up
         uses: upbound/action-up-project@v1.1.2
         with:
           skip-login-check: true
-
-      - name: Install crane
-        run: |
-          # Install crane for pulling OCI packages
-          CRANE_VERSION="v0.20.2"
-          curl -sL "https://github.com/google/go-containerregistry/releases/download/${CRANE_VERSION}/go-containerregistry_Linux_x86_64.tar.gz" | tar -xzf - crane
-          sudo mv crane /usr/local/bin/
-
-      # - name: Pre-pull Docker images
-      #   run: |
-      #     # Pre-pull images used by `up` CLI to prevent timeout issues
-      #     # Pull all images in parallel for faster startup
-      #     echo "Pre-pulling Docker images in parallel..."
-
-      #     # Standard Docker images
-      #     docker pull kindest/node:v1.33.1 --quiet &
-
-      #     # Extract and pull function/provider packages from upbound.yaml using crane
-      #     if [ -f upbound.yaml ]; then
-      #       echo "Pulling functions from upbound.yaml..."
-      #       yq -r '.spec.dependsOn[] | select(.kind == "Function") | .package' upbound.yaml 2>/dev/null | while read pkg; do
-      #         if [ -n "$pkg" ]; then
-      #           echo "Pre-pulling function: $pkg"
-      #           crane pull "$pkg" /dev/null 2>/dev/null &
-      #         fi
-      #       done
-
-      #       echo "Pulling providers from upbound.yaml..."
-      #       yq -r '.spec.dependsOn[] | select(.kind == "Provider") | .package' upbound.yaml 2>/dev/null | while read pkg; do
-      #         if [ -n "$pkg" ]; then
-      #           echo "Pre-pulling provider: $pkg"
-      #           crane pull "$pkg" /dev/null 2>/dev/null &
-      #         fi
-      #       done
-      #     fi
-
-      #     # Wait for all background pulls to complete
-      #     wait
-      #     echo "All images pre-pulled"
-      #   timeout-minutes: 5
 
       - name: Publish
         uses: upbound/action-up-project@v1.1.2
