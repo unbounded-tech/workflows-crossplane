@@ -35,6 +35,8 @@ jobs:
         with:
           path: |
             ~/.crossplane/cache
+            ~/.up/cache
+            ~/.up/build-cache
           key: ${{ runner.os }}-crossplane-${{ hashFiles('**/upbound.yaml','**/definition.yaml') }}-
 
       - name: Install & login with up

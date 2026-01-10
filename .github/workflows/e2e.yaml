@@ -129,6 +129,8 @@ jobs:
         with:
           path: |
             ~/.crossplane/cache
+            ~/.up/cache
+            ~/.up/build-cache
           key: ${{ runner.os }}-crossplane-${{ hashFiles('**/upbound.yaml','**/definition.yaml') }}-
 
       - name: Install & login with up
@@ -298,7 +300,7 @@ jobs:
           CLUSTER_NAME=$(kind get clusters | head -n1)
           kind export kubeconfig --name "$CLUSTER_NAME"
           echo "=== Namespace Events ==="
-          kubectl get events -n ${{ inputs.namespace }} --sort-by='.lastTimestamp'
+          kubectl get events -n ${{ inputs.namespace }} --sort-by='.lastTimestamp' || true
 
       - name: (Debug) Logs For Managed Resources
         if: always()
@@ -310,11 +312,17 @@ jobs:
           CLUSTER_NAME=$(kind get clusters | head -n1)
           kind export kubeconfig --name "$CLUSTER_NAME"
           echo "=== All Managed Resources ==="
-          kubectl get managed -n ${{ inputs.namespace }}
+          MANAGED_OUTPUT=$(kubectl get managed -n ${{ inputs.namespace }} 2>/dev/null) || true
+          if [ -z "$MANAGED_OUTPUT" ]; then
+            echo "No managed resources found"
+            exit 0
+          fi
+          echo "$MANAGED_OUTPUT"
           echo ""
           echo "=== Resources with False or Unknown (-) conditions ==="
-          kubectl get managed -n ${{ inputs.namespace }} | awk 'NR>1 && ($2 == "False" || $2 == "-" || $3 == "False" || $3 == "-") {print $1}' | while read -r resource; do
-            if [ -n "$resource" ]; then
+          FAILED_RESOURCES=$(echo "$MANAGED_OUTPUT" | awk 'NR>1 && ($2 == "False" || $2 == "-" || $3 == "False" || $3 == "-") {print $1}')
+          if [ -n "$FAILED_RESOURCES" ]; then
+            echo "$FAILED_RESOURCES" | while read -r resource; do
               if [ "${{ inputs.debug-get-yaml }}" = "true" ]; then
                 echo ""
                 echo "=== $resource YAML ==="
@@ -325,8 +333,10 @@ jobs:
                 echo "=== $resource Describe ==="
                 kubectl describe "$resource" -n ${{ inputs.namespace }} || true
               fi
-            fi
-          done
+            done
+          else
+            echo "No failed resources found"
+          fi
 
       - name: (Debug) Logs For Usages
         if: always() && inputs.debug-usages
@@ -457,11 +467,17 @@ jobs:
           CLUSTER_NAME=$(kind get clusters | head -n1)
           kind export kubeconfig --name "$CLUSTER_NAME"
           echo "=== Cleanup failed - listing remaining managed resources ==="
-          kubectl get managed -n ${{ inputs.namespace }}
+          MANAGED_OUTPUT=$(kubectl get managed -n ${{ inputs.namespace }} 2>/dev/null) || true
+          if [ -z "$MANAGED_OUTPUT" ]; then
+            echo "No managed resources found"
+            exit 0
+          fi
+          echo "$MANAGED_OUTPUT"
           echo ""
           echo "=== Debugging all remaining resources ==="
-          kubectl get managed -n ${{ inputs.namespace }} --no-headers 2>/dev/null | awk '{print $1}' | while read -r resource; do
-            if [ -n "$resource" ]; then
+          REMAINING_RESOURCES=$(echo "$MANAGED_OUTPUT" | awk 'NR>1 {print $1}')
+          if [ -n "$REMAINING_RESOURCES" ]; then
+            echo "$REMAINING_RESOURCES" | while read -r resource; do
               if [ "${{ inputs.debug-get-yaml }}" = "true" ]; then
                 echo ""
                 echo "=== $resource YAML ==="
@@ -472,8 +488,8 @@ jobs:
                 echo "=== $resource Describe ==="
                 kubectl describe "$resource" -n ${{ inputs.namespace }} || true
               fi
-            fi
-          done
+            done
+          fi
 
       - name: (Debug) Log Remaining Usages
         if: always() && steps.cleanup.outcome != 'success' && inputs.debug-usages
