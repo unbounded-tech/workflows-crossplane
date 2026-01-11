@@ -459,7 +459,7 @@ jobs:
           fi
           kind export kubeconfig --name "$CLUSTER_NAME"
           kubectl get managed -n ${{ inputs.namespace }} || true
-          kubectl wait --for=delete -n ${{ inputs.namespace }} --all managed || true
+          kubectl wait --for=delete --timeout=${{ inputs.cleanup-timeout-minutes }}m -n ${{ inputs.namespace }} --all managed || true
 
       - name: (Debug) Log Remaining Managed Resources
         if: always() && steps.cleanup.outcome != 'success'
