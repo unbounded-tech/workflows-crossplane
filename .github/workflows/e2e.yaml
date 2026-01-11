@@ -319,8 +319,8 @@ jobs:
           fi
           echo "$MANAGED_OUTPUT"
           echo ""
-          echo "=== Resources with False or Unknown (-) conditions ==="
-          FAILED_RESOURCES=$(echo "$MANAGED_OUTPUT" | awk 'NR>1 && ($2 == "False" || $2 == "-" || $3 == "False" || $3 == "-") {print $1}')
+          echo "=== Resources not fully ready (SYNCED and READY not both True) ==="
+          FAILED_RESOURCES=$(echo "$MANAGED_OUTPUT" | awk 'NR>1 && !/True[[:space:]]+True/ {print $1}')
           if [ -n "$FAILED_RESOURCES" ]; then
             echo "$FAILED_RESOURCES" | while read -r resource; do
               if [ "${{ inputs.debug-get-yaml }}" = "true" ]; then
