@@ -320,7 +320,7 @@ jobs:
           echo "$MANAGED_OUTPUT"
           echo ""
           echo "=== Resources not fully ready (SYNCED and READY not both True) ==="
-          FAILED_RESOURCES=$(echo "$MANAGED_OUTPUT" | awk 'NR>1 && !/True[[:space:]]+True/ {print $1}')
+          FAILED_RESOURCES=$(echo "$MANAGED_OUTPUT" | awk 'NF && !/^NAME/ && !/True[[:space:]]+True/ {print $1}')
           if [ -n "$FAILED_RESOURCES" ]; then
             echo "$FAILED_RESOURCES" | while read -r resource; do
               if [ "${{ inputs.debug-get-yaml }}" = "true" ]; then
