@@ -475,7 +475,7 @@ jobs:
           echo "$MANAGED_OUTPUT"
           echo ""
           echo "=== Debugging all remaining resources ==="
-          REMAINING_RESOURCES=$(echo "$MANAGED_OUTPUT" | awk 'NR>1 {print $1}')
+          REMAINING_RESOURCES=$(echo "$MANAGED_OUTPUT" | awk 'NF && !/^NAME/ {print $1}')
           if [ -n "$REMAINING_RESOURCES" ]; then
             echo "$REMAINING_RESOURCES" | while read -r resource; do
               if [ "${{ inputs.debug-get-yaml }}" = "true" ]; then
