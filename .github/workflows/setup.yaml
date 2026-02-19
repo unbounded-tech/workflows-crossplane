@@ -59,14 +59,14 @@ jobs:
 
       - name: Docker login to GHCR
         if: inputs.ghcr_user
-        uses: docker/login-action@v3.6.0
+        uses: docker/login-action@v3.7.0
         with:
           registry: ghcr.io
           username: ${{ inputs.ghcr_user }}
           password: ${{ secrets.GH_PAT }}
 
       - name: Docker login to GHCR
-        uses: docker/login-action@v3.6.0
+        uses: docker/login-action@v3.7.0
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
