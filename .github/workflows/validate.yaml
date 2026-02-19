@@ -138,6 +138,99 @@ jobs:
         with:
           skip-login-check: true
 
+      - name: Generate configuration metadata from upbound.yaml
+        run: |
+          set -euo pipefail
+
+          upbound_file="upbound.yaml"
+          output_file="${{ inputs.api_path }}/configuration.yaml"
+
+          if [ ! -f "$upbound_file" ]; then
+            echo "Expected $upbound_file at repository root."
+            exit 1
+          fi
+
+          mkdir -p "${{ inputs.api_path }}"
+
+          python3 - "$upbound_file" "$output_file" <<'PY'
+          import re
+          import sys
+
+          try:
+              import yaml
+          except Exception:
+              import subprocess
+              subprocess.check_call(
+                  [sys.executable, "-m", "pip", "install", "--quiet", "--user", "PyYAML"]
+              )
+              import yaml
+
+          in_file, out_file = sys.argv[1], sys.argv[2]
+
+          with open(in_file, "r", encoding="utf-8") as f:
+              project = yaml.safe_load(f) or {}
+
+          metadata = project.get("metadata") or {}
+          spec = project.get("spec") or {}
+
+          name = metadata.get("name")
+          if not name:
+              raise SystemExit("upbound.yaml is missing metadata.name")
+
+          maintainer = spec.get("maintainer", "")
+          if isinstance(maintainer, str):
+              maintainer = re.sub(r"\s*<[^>]+>\s*$", "", maintainer).strip()
+
+          annotations = {
+              "meta.crossplane.io/maintainer": maintainer,
+              "meta.crossplane.io/source": spec.get("source", ""),
+              "meta.crossplane.io/description": spec.get("description", ""),
+          }
+
+          depends_on = []
+          for dep in spec.get("dependsOn") or []:
+              if not isinstance(dep, dict):
+                  continue
+
+              kind = str(dep.get("kind", "")).strip().lower()
+              package = dep.get("package")
+              version = dep.get("version")
+              if not package:
+                  continue
+
+              if kind == "provider":
+                  item = {"provider": package}
+              elif kind == "function":
+                  item = {"function": package}
+              elif kind == "configuration":
+                  item = {"configuration": package}
+              else:
+                  continue
+
+              if version is not None:
+                  item["version"] = version
+              depends_on.append(item)
+
+          output = {
+              "apiVersion": "meta.pkg.crossplane.io/v1alpha1",
+              "kind": "Configuration",
+              "metadata": {
+                  "name": name,
+                  "annotations": {k: v for k, v in annotations.items() if v},
+              },
+              "spec": {
+                  "dependsOn": depends_on,
+              },
+          }
+
+          with open(out_file, "w", encoding="utf-8") as f:
+              yaml.safe_dump(output, f, sort_keys=False)
+
+          print(f"Wrote {out_file}")
+          PY
+
+          cat "$output_file"
+
       - name: Render Example
         run: |
           observed_flag=""
