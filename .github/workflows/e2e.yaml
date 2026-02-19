@@ -193,7 +193,7 @@ jobs:
       - name: Configure AWS Credentials (OIDC)
         if: inputs.aws && inputs.aws-use-oidc
         id: aws-oidc-creds
-        uses: aws-actions/configure-aws-credentials@v5
+        uses: aws-actions/configure-aws-credentials@v6
         with:
           role-to-assume: ${{ inputs.aws-role-arn || format('arn:aws:iam::{0}:role/{1}', inputs.aws-account-id, inputs.aws-role-name) }}
           aws-region: ${{ inputs.aws-region }}
