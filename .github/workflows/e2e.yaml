@@ -66,6 +66,12 @@ on:
         type: string
         default: 'us-east-1'
 
+      aws-role-duration-seconds:
+        description: 'Duration in seconds for the OIDC assumed role session (default: 3600 = 1 hour)'
+        required: false
+        type: number
+        default: 3600
+
       debug-resource-types:
         description: 'JSON array of resource types to debug and delete on test failure. These resources will be logged for debugging and deleted during cleanup to handle sibling resources not removed by cascade deletion (e.g., ["network.hops.ops.com.ai", "IdentityCenter.aws.platform.upbound.io"])'
         required: false
@@ -197,6 +203,7 @@ jobs:
         with:
           role-to-assume: ${{ inputs.aws-role-arn || format('arn:aws:iam::{0}:role/{1}', inputs.aws-account-id, inputs.aws-role-name) }}
           aws-region: ${{ inputs.aws-region }}
+          role-duration-seconds: ${{ inputs.aws-role-duration-seconds }}
           output-credentials: true
 
       - name: Create AWS Credentials
