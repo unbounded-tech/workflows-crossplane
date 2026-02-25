@@ -4,70 +4,70 @@ on:
   workflow_call:
     inputs:
       ghcr-user:
-        description: 'ghcr user'
+        description: "ghcr user"
         required: false
         type: string
 
       crossplane_version:
-        description: 'Crossplane CLI version to install'
+        description: "Crossplane CLI version to install"
         required: false
         type: string
-        default: 'v2.0.2'
+        default: "v2.0.2"
 
       pattern:
-        description: 'Test file pattern'
+        description: "Test file pattern"
         required: false
         type: string
-        default: 'tests/e2e*'
+        default: "tests/e2e*"
 
       timeout-minutes:
-        description: 'Timeout in minutes for the e2e test step'
+        description: "Timeout in minutes for the e2e test step"
         required: false
         type: number
         default: 33
 
       cleanup-timeout-minutes:
-        description: 'Timeout in minutes for the cleanup step'
+        description: "Timeout in minutes for the cleanup step"
         required: false
         type: number
         default: 33
 
       aws:
-        description: 'Enable AWS credentials setup'
+        description: "Enable AWS credentials setup"
         required: false
         type: boolean
         default: false
 
       aws-use-oidc:
-        description: 'Use GitHub OIDC to assume an AWS role'
+        description: "Use GitHub OIDC to assume an AWS role"
         required: false
         type: boolean
         default: false
 
       aws-role-name:
-        description: 'AWS IAM role name to assume via OIDC'
+        description: "AWS IAM role name to assume via OIDC"
         required: false
         type: string
-        default: 'hops-github-actions'
+        default: "hops-github-actions"
 
       aws-role-arn:
-        description: 'AWS IAM role ARN to assume via OIDC (overrides aws-role-name + aws-account-id)'
+        description: "AWS IAM role ARN to assume via OIDC (overrides aws-role-name + aws-account-id)"
         required: false
         type: string
 
       aws-account-id:
-        description: 'AWS account ID used to build role ARN when aws-role-arn is not provided'
+        description: "AWS account ID used to build role ARN when aws-role-arn is not provided"
         required: false
         type: string
 
       aws-region:
-        description: 'AWS region for OIDC credential configuration'
+        description: "AWS region for OIDC credential configuration"
         required: false
         type: string
-        default: 'us-east-1'
+        default: "us-east-1"
 
       aws-role-duration-seconds:
-        description: 'Duration in seconds for the OIDC assumed role session (default: 3600 = 1 hour)'
+        description: "Duration in seconds for the OIDC assumed role session (default: 3600 = 1 hour)"
         required: false
         type: number
         default: 3600
@@ -78,44 +78,44 @@ on:
         type: string
 
       debug-get-yaml:
-        description: 'Show kubectl get -o yaml output for failed resources'
+        description: "Show kubectl get -o yaml output for failed resources"
         required: false
         type: boolean
         default: false
 
       debug-describe:
-        description: 'Show kubectl describe output for failed resources'
+        description: "Show kubectl describe output for failed resources"
         required: false
         type: boolean
         default: true
 
       debug-usages:
-        description: 'Show kubectl get usages output for debugging'
+        description: "Show kubectl get usages output for debugging"
         required: false
         type: boolean
         default: true
 
       namespace:
-        description: 'Kubernetes namespace for test resources'
+        description: "Kubernetes namespace for test resources"
         required: false
         type: string
-        default: 'default'
+        default: "default"
 
     secrets:
       GH_PAT:
-        description: 'Token for ghcr.io package write access'
+        description: "Token for ghcr.io package write access"
         required: false
 
       AWS_ACCESS_KEY_ID:
-        description: 'AWS Access Key ID for E2E tests'
+        description: "AWS Access Key ID for E2E tests"
         required: false
 
       AWS_SECRET_ACCESS_KEY:
-        description: 'AWS Secret Access Key for E2E tests'
+        description: "AWS Secret Access Key for E2E tests"
         required: false
 
       AWS_SESSION_TOKEN:
-        description: 'AWS Session Token for E2E tests (required for OIDC/assumed roles)'
+        description: "AWS Session Token for E2E tests (required for OIDC/assumed roles)"
         required: false
 
 permissions:
@@ -230,19 +230,6 @@ jobs:
             fi
           done
 
-      # - name: Create ENV secrets
-      #   run: |
-      #     for dir in ${{ inputs.pattern }}; do
-      #       if [ -d "$dir" ]; then
-      #         mkdir -p "$dir/secrets/env"
-      #         env | while IFS='=' read -r name value; do
-      #           if [ -n "$name" ]; then
-      #             echo "$value" > "$dir/secrets/env/$name"
-      #           fi
-      #         done
-      #       fi
-      #     done
-
       - name: Test
         id: test
         timeout-minutes: ${{ inputs.timeout-minutes }}
@@ -355,20 +342,20 @@ jobs:
           CLUSTER_NAME=$(kind get clusters | head -n1)
           kind export kubeconfig --name "$CLUSTER_NAME"
           echo "=== Usages ==="
-          kubectl get usages -n ${{ inputs.namespace }} || true
+          kubectl get usages.protection.crossplane.io -n ${{ inputs.namespace }} || true
           echo ""
-          echo "=== Debugging usages ==="
-          kubectl get usages -n ${{ inputs.namespace }} --no-headers 2>/dev/null | awk '{print $1}' | while read -r usage; do
+          echo "=== Debugging usages.protection.crossplane.io ==="
+          kubectl get usages.protection.crossplane.io -n ${{ inputs.namespace }} --no-headers 2>/dev/null | awk '{print $1}' | while read -r usage; do
             if [ -n "$usage" ]; then
               if [ "${{ inputs.debug-get-yaml }}" = "true" ]; then
                 echo ""
                 echo "=== usage/$usage YAML ==="
-                kubectl get usage "$usage" -n ${{ inputs.namespace }} -o yaml || true
+                kubectl get usages.protection.crossplane.io "$usage" -n ${{ inputs.namespace }} -o yaml || true
               fi
               if [ "${{ inputs.debug-describe }}" = "true" ]; then
                 echo ""
                 echo "=== usage/$usage Describe ==="
-                kubectl describe usage "$usage" -n ${{ inputs.namespace }} || true
+                kubectl describe usages.protection.crossplane.io "$usage" -n ${{ inputs.namespace }} || true
               fi
             fi
           done
@@ -465,6 +452,7 @@ jobs:
             exit 0
           fi
           kind export kubeconfig --name "$CLUSTER_NAME"
+          kubectl get usages.protection.crossplane.io -n ${{ inputs.namespace }} || true
           kubectl get managed -n ${{ inputs.namespace }} || true
           kubectl wait --for=delete --timeout=${{ inputs.cleanup-timeout-minutes }}m -n ${{ inputs.namespace }} --all managed || true
 
@@ -504,20 +492,20 @@ jobs:
           CLUSTER_NAME=$(kind get clusters | head -n1)
           kind export kubeconfig --name "$CLUSTER_NAME"
           echo "=== Usages ==="
-          kubectl get usages -n ${{ inputs.namespace }} || true
+          kubectl get usages.protection.crossplane.io -n ${{ inputs.namespace }} || true
           echo ""
-          echo "=== Debugging usages ==="
-          kubectl get usages -n ${{ inputs.namespace }} --no-headers 2>/dev/null | awk '{print $1}' | while read -r usage; do
+          echo "=== Debugging usages.protection.crossplane.io ==="
+          kubectl get usages.protection.crossplane.io -n ${{ inputs.namespace }} --no-headers 2>/dev/null | awk '{print $1}' | while read -r usage; do
             if [ -n "$usage" ]; then
               if [ "${{ inputs.debug-get-yaml }}" = "true" ]; then
                 echo ""
                 echo "=== usage/$usage YAML ==="
-                kubectl get usage "$usage" -n ${{ inputs.namespace }} -o yaml || true
+                kubectl get usages.protection.crossplane.io "$usage" -n ${{ inputs.namespace }} -o yaml || true
               fi
               if [ "${{ inputs.debug-describe }}" = "true" ]; then
                 echo ""
                 echo "=== usage/$usage Describe ==="
-                kubectl describe usage "$usage" -n ${{ inputs.namespace }} || true
+                kubectl describe usages.protection.crossplane.io "$usage" -n ${{ inputs.namespace }} || true
               fi
             fi
           done
