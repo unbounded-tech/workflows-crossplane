@@ -100,6 +100,12 @@ on:
         required: false
         type: string
 
+      delete-extra-resources-timeout-minutes:
+        description: "Timeout in minutes for the delete-extra-resources step"
+        required: false
+        type: number
+        default: 10
+
       namespace:
         description: "Kubernetes namespace for test resources"
         required: false
@@ -463,7 +469,7 @@ jobs:
 
       - name: Delete extra resources
         if: always() && inputs.delete-extra-resources
-        timeout-minutes: ${{ inputs.cleanup-timeout-minutes }}
+        timeout-minutes: ${{ inputs.delete-extra-resources-timeout-minutes }}
         run: |
           CLUSTER_NAME=$(kind get clusters | head -n1)
           if [ -z "$CLUSTER_NAME" ]; then
@@ -487,7 +493,7 @@ jobs:
           echo "$EXTRA_TYPES" | jq -r '.[]' | while read -r resource_type; do
             if [ -n "$resource_type" ]; then
               echo "Waiting for $resource_type to be deleted..."
-              kubectl wait --for=delete --timeout=${{ inputs.cleanup-timeout-minutes }}m -n ${{ inputs.namespace }} --all "$resource_type" 2>/dev/null || true
+              kubectl wait --for=delete --timeout=${{ inputs.delete-extra-resources-timeout-minutes }}m -n ${{ inputs.namespace }} --all "$resource_type" 2>/dev/null || true
             fi
           done
 
