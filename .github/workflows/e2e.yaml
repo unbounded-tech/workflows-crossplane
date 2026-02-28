@@ -95,6 +95,23 @@ on:
         type: boolean
         default: true
 
+      manual-cleanup:
+        description: "Enable manual cleanup of specific resources after test (use with delete-root-resource and/or delete-resources)"
+        required: false
+        type: boolean
+        default: false
+
+      delete-root-resource:
+        description: "Delete the auto-discovered root composite resource during manual cleanup"
+        required: false
+        type: boolean
+        default: false
+
+      delete-resources:
+        description: 'JSON array of resource API types to delete during manual cleanup (e.g., ["buckets.s3.aws.upbound.io", "roles.iam.aws.upbound.io"])'
+        required: false
+        type: string
+
       delete-extra-resources:
         description: 'JSON array of resource API types to delete and wait for after cleanup (e.g., ["buckets.s3.aws.upbound.io", "roles.iam.aws.upbound.io"])'
         required: false
@@ -246,6 +263,53 @@ jobs:
         timeout-minutes: ${{ inputs.timeout-minutes }}
         run: |
           up test run ${{ inputs.pattern }} --e2e --skip-control-plane-cleanup
+
+      - name: Delete resources (manual cleanup)
+        if: always() && inputs.manual-cleanup
+        timeout-minutes: ${{ inputs.cleanup-timeout-minutes }}
+        run: |
+          CLUSTER_NAME=$(kind get clusters | head -n1)
+          if [ -z "$CLUSTER_NAME" ]; then
+            echo "No kind cluster found, skipping"
+            exit 0
+          fi
+          kind export kubeconfig --name "$CLUSTER_NAME"
+
+          # Delete root resource if requested
+          if [ "${{ inputs.delete-root-resource }}" = "true" ]; then
+            # Auto-discover root resource type from apis/**/definition.yaml
+            for def_file in apis/*/definition.yaml; do
+              if [ -f "$def_file" ]; then
+                ROOT_TYPE=$(yq '.metadata.name' "$def_file")
+                if [ -n "$ROOT_TYPE" ] && [ "$ROOT_TYPE" != "null" ]; then
+                  echo "=== Deleting root resource type: $ROOT_TYPE ==="
+                  kubectl delete "$ROOT_TYPE" --all -n ${{ inputs.namespace }} || true
+                  echo "Waiting for $ROOT_TYPE to be deleted..."
+                  kubectl wait --for=delete --timeout=${{ inputs.cleanup-timeout-minutes }}m -n ${{ inputs.namespace }} --all "$ROOT_TYPE" 2>/dev/null || true
+                fi
+              fi
+            done
+          fi
+
+          # Delete additional resource types if provided
+          DELETE_TYPES='${{ inputs.delete-resources }}'
+          if [ -n "$DELETE_TYPES" ]; then
+            echo "$DELETE_TYPES" | jq -r '.[]' | while read -r resource_type; do
+              if [ -n "$resource_type" ]; then
+                echo "=== Deleting all $resource_type ==="
+                kubectl delete "$resource_type" --all -n ${{ inputs.namespace }} || true
+              fi
+            done
+
+            echo ""
+            echo "=== Waiting for resources to be deleted ==="
+            echo "$DELETE_TYPES" | jq -r '.[]' | while read -r resource_type; do
+              if [ -n "$resource_type" ]; then
+                echo "Waiting for $resource_type to be deleted..."
+                kubectl wait --for=delete --timeout=${{ inputs.cleanup-timeout-minutes }}m -n ${{ inputs.namespace }} --all "$resource_type" 2>/dev/null || true
+              fi
+            done
+          fi
 
       - name: (Debug) Set debug resource types
         if: always()
