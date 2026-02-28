@@ -568,7 +568,7 @@ jobs:
 
       - name: Wait for cleanup
         id: cleanup
-        if: always() && !inputs.manual-cleanup
+        if: always() && !inputs.manual-cleanup && !inputs.delete-extra-resources
         timeout-minutes: ${{ inputs.cleanup-timeout-minutes }}
         run: |
           CLUSTER_NAME=$(kind get clusters | head -n1)
@@ -580,6 +580,62 @@ jobs:
           kubectl get usages.protection.crossplane.io -n ${{ inputs.namespace }} || true
           kubectl get managed -n ${{ inputs.namespace }} || true
           kubectl wait --for=delete --timeout=${{ inputs.cleanup-timeout-minutes }}m -n ${{ inputs.namespace }} --all managed || true
+
+      - name: Wait for cascade cleanup
+        if: always() && inputs.delete-extra-resources
+        timeout-minutes: ${{ inputs.cleanup-timeout-minutes }}
+        run: |
+          CLUSTER_NAME=$(kind get clusters | head -n1)
+          if [ -z "$CLUSTER_NAME" ]; then
+            echo "No kind cluster found, skipping"
+            exit 0
+          fi
+          kind export kubeconfig --name "$CLUSTER_NAME"
+
+          NS="${{ inputs.namespace }}"
+          EXTRA_TYPES='${{ inputs.delete-extra-resources }}'
+
+          # Build a grep pattern to exclude extra resource types from managed list
+          # Extra types are plural API form (e.g. buckets.s3.aws.upbound.io)
+          EXCLUDE_PATTERN=""
+          if [ -n "$EXTRA_TYPES" ]; then
+            for extra_type in $(echo "$EXTRA_TYPES" | jq -r '.[]'); do
+              if [ -n "$EXCLUDE_PATTERN" ]; then
+                EXCLUDE_PATTERN="$EXCLUDE_PATTERN|$extra_type"
+              else
+                EXCLUDE_PATTERN="$extra_type"
+              fi
+            done
+          fi
+
+          echo "=== Waiting for cascade-deleted resources (excluding: $EXCLUDE_PATTERN) ==="
+
+          while true; do
+            # Get all managed resources, filter out header and extra resource types
+            MANAGED=$(kubectl get managed -n "$NS" --no-headers 2>/dev/null) || true
+
+            if [ -z "$MANAGED" ]; then
+              echo "$(date '+%H:%M:%S') - No managed resources remaining"
+              break
+            fi
+
+            # Filter out extra resource types
+            if [ -n "$EXCLUDE_PATTERN" ]; then
+              REMAINING=$(echo "$MANAGED" | grep -vE "$EXCLUDE_PATTERN") || true
+            else
+              REMAINING="$MANAGED"
+            fi
+
+            if [ -z "$REMAINING" ]; then
+              echo "$(date '+%H:%M:%S') - All cascade-deleted resources are gone"
+              break
+            fi
+
+            REMAINING_COUNT=$(echo "$REMAINING" | wc -l | tr -d ' ')
+            echo "$(date '+%H:%M:%S') - $REMAINING_COUNT resources remaining:"
+            echo "$REMAINING"
+            sleep 30
+          done
 
       - name: Delete extra resources
         if: always() && inputs.delete-extra-resources
