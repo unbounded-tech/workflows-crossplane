@@ -95,6 +95,11 @@ on:
         type: boolean
         default: true
 
+      delete-extra-resources:
+        description: 'JSON array of resource API types to delete and wait for after cleanup (e.g., ["buckets.s3.aws.upbound.io", "roles.iam.aws.upbound.io"])'
+        required: false
+        type: string
+
       namespace:
         description: "Kubernetes namespace for test resources"
         required: false
@@ -455,6 +460,36 @@ jobs:
           kubectl get usages.protection.crossplane.io -n ${{ inputs.namespace }} || true
           kubectl get managed -n ${{ inputs.namespace }} || true
           kubectl wait --for=delete --timeout=${{ inputs.cleanup-timeout-minutes }}m -n ${{ inputs.namespace }} --all managed || true
+
+      - name: Delete extra resources
+        if: always() && inputs.delete-extra-resources
+        timeout-minutes: ${{ inputs.cleanup-timeout-minutes }}
+        run: |
+          CLUSTER_NAME=$(kind get clusters | head -n1)
+          if [ -z "$CLUSTER_NAME" ]; then
+            echo "No kind cluster found, skipping"
+            exit 0
+          fi
+          kind export kubeconfig --name "$CLUSTER_NAME"
+
+          EXTRA_TYPES='${{ inputs.delete-extra-resources }}'
+          echo "Deleting extra resource types: $EXTRA_TYPES"
+
+          echo "$EXTRA_TYPES" | jq -r '.[]' | while read -r resource_type; do
+            if [ -n "$resource_type" ]; then
+              echo "=== Deleting all $resource_type ==="
+              kubectl delete "$resource_type" --all -n ${{ inputs.namespace }} || true
+            fi
+          done
+
+          echo ""
+          echo "=== Waiting for extra resources to be deleted ==="
+          echo "$EXTRA_TYPES" | jq -r '.[]' | while read -r resource_type; do
+            if [ -n "$resource_type" ]; then
+              echo "Waiting for $resource_type to be deleted..."
+              kubectl wait --for=delete --timeout=${{ inputs.cleanup-timeout-minutes }}m -n ${{ inputs.namespace }} --all "$resource_type" 2>/dev/null || true
+            fi
+          done
 
       - name: (Debug) Log Remaining Managed Resources
         if: always() && steps.cleanup.outcome != 'success'
