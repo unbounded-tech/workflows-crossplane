@@ -95,6 +95,34 @@ on:
         type: boolean
         default: true
 
+      manual-cleanup:
+        description: "Enable manual cleanup of specific resources after test (use with delete-root-resource and/or delete-resources)"
+        required: false
+        type: boolean
+        default: false
+
+      delete-root-resource:
+        description: "Delete the auto-discovered root composite resource during manual cleanup"
+        required: false
+        type: boolean
+        default: false
+
+      delete-resources:
+        description: 'JSON array of resource API types to delete during manual cleanup (e.g., ["buckets.s3.aws.upbound.io", "roles.iam.aws.upbound.io"])'
+        required: false
+        type: string
+
+      delete-extra-resources:
+        description: 'JSON array of resource API types to delete and wait for after cleanup (e.g., ["buckets.s3.aws.upbound.io", "roles.iam.aws.upbound.io"])'
+        required: false
+        type: string
+
+      delete-extra-resources-timeout-minutes:
+        description: "Timeout in minutes for the delete-extra-resources step"
+        required: false
+        type: number
+        default: 10
+
       namespace:
         description: "Kubernetes namespace for test resources"
         required: false
@@ -235,6 +263,103 @@ jobs:
         timeout-minutes: ${{ inputs.timeout-minutes }}
         run: |
           up test run ${{ inputs.pattern }} --e2e --skip-control-plane-cleanup
+
+      - name: Delete resources (manual cleanup)
+        if: always() && inputs.manual-cleanup
+        timeout-minutes: ${{ inputs.cleanup-timeout-minutes }}
+        run: |
+          CLUSTER_NAME=$(kind get clusters | head -n1)
+          if [ -z "$CLUSTER_NAME" ]; then
+            echo "No kind cluster found, skipping"
+            exit 0
+          fi
+          kind export kubeconfig --name "$CLUSTER_NAME"
+
+          NS="${{ inputs.namespace }}"
+          TRACKED_FILE=$(mktemp)
+
+          trace_and_delete() {
+            local resource_type="$1"
+            local name="$2"
+
+            echo ""
+            echo "=== Tracing $resource_type/$name ==="
+            TRACE=$(crossplane beta trace "$resource_type" "$name" -n "$NS" 2>/dev/null) || true
+            if [ -n "$TRACE" ]; then
+              echo "$TRACE"
+              # Extract Kind/name references from trace output (skip header line)
+              echo "$TRACE" | tail -n +2 \
+                | awk '{for(i=1;i<=NF;i++){if($i ~ /\//){print $i; break}}}' \
+                >> "$TRACKED_FILE"
+            fi
+
+            echo ""
+            echo "Deleting $resource_type/$name"
+            kubectl delete "$resource_type" "$name" -n "$NS" || true
+          }
+
+          # Delete root resource if requested
+          if [ "${{ inputs.delete-root-resource }}" = "true" ]; then
+            for def_file in apis/*/definition.yaml; do
+              if [ -f "$def_file" ]; then
+                ROOT_TYPE=$(yq '.metadata.name' "$def_file")
+                if [ -n "$ROOT_TYPE" ] && [ "$ROOT_TYPE" != "null" ]; then
+                  echo "=== Discovering $ROOT_TYPE resources ==="
+                  NAMES=$(kubectl get "$ROOT_TYPE" -n "$NS" --no-headers 2>/dev/null | awk '{print $1}')
+                  for name in $NAMES; do
+                    trace_and_delete "$ROOT_TYPE" "$name"
+                  done
+                fi
+              fi
+            done
+          fi
+
+          # Delete additional resource types if provided
+          DELETE_TYPES='${{ inputs.delete-resources }}'
+          if [ -n "$DELETE_TYPES" ]; then
+            for resource_type in $(echo "$DELETE_TYPES" | jq -r '.[]'); do
+              if [ -n "$resource_type" ]; then
+                echo ""
+                echo "=== Discovering $resource_type resources ==="
+                NAMES=$(kubectl get "$resource_type" -n "$NS" --no-headers 2>/dev/null | awk '{print $1}')
+                for name in $NAMES; do
+                  trace_and_delete "$resource_type" "$name"
+                done
+              fi
+            done
+          fi
+
+          # Wait for all traced resources to be deleted
+          if [ -s "$TRACKED_FILE" ]; then
+            sort -u "$TRACKED_FILE" -o "$TRACKED_FILE"
+            TOTAL=$(wc -l < "$TRACKED_FILE" | tr -d ' ')
+            echo ""
+            echo "=== Waiting for $TOTAL resources to be deleted ==="
+
+            while true; do
+              REMAINING_COUNT=0
+              REMAINING_LIST=""
+              while IFS= read -r ref; do
+                if [ -n "$ref" ] && kubectl get "$ref" >/dev/null 2>&1; then
+                  REMAINING_COUNT=$((REMAINING_COUNT + 1))
+                  REMAINING_LIST="$REMAINING_LIST  $ref"$'\n'
+                fi
+              done < "$TRACKED_FILE"
+
+              if [ "$REMAINING_COUNT" -eq 0 ]; then
+                echo "$(date '+%H:%M:%S') - All resources deleted successfully"
+                break
+              fi
+
+              echo "$(date '+%H:%M:%S') - $REMAINING_COUNT/$TOTAL resources remaining:"
+              printf "%s" "$REMAINING_LIST"
+              sleep 30
+            done
+          else
+            echo "No resources to wait for"
+          fi
+
+          rm -f "$TRACKED_FILE"
 
       - name: (Debug) Set debug resource types
         if: always()
@@ -443,7 +568,7 @@ jobs:
 
       - name: Wait for cleanup
         id: cleanup
-        if: always()
+        if: always() && !inputs.manual-cleanup && !inputs.delete-extra-resources
         timeout-minutes: ${{ inputs.cleanup-timeout-minutes }}
         run: |
           CLUSTER_NAME=$(kind get clusters | head -n1)
@@ -455,6 +580,134 @@ jobs:
           kubectl get usages.protection.crossplane.io -n ${{ inputs.namespace }} || true
           kubectl get managed -n ${{ inputs.namespace }} || true
           kubectl wait --for=delete --timeout=${{ inputs.cleanup-timeout-minutes }}m -n ${{ inputs.namespace }} --all managed || true
+
+      - name: Wait for cascade cleanup
+        if: always() && inputs.delete-extra-resources
+        timeout-minutes: ${{ inputs.cleanup-timeout-minutes }}
+        run: |
+          CLUSTER_NAME=$(kind get clusters | head -n1)
+          if [ -z "$CLUSTER_NAME" ]; then
+            echo "No kind cluster found, skipping"
+            exit 0
+          fi
+          kind export kubeconfig --name "$CLUSTER_NAME"
+
+          NS="${{ inputs.namespace }}"
+          EXTRA_TYPES='${{ inputs.delete-extra-resources }}'
+
+          # Build a grep pattern to exclude extra resource types from managed list
+          # Extra types are plural API form (e.g. buckets.s3.aws.upbound.io)
+          EXCLUDE_PATTERN=""
+          if [ -n "$EXTRA_TYPES" ]; then
+            for extra_type in $(echo "$EXTRA_TYPES" | jq -r '.[]'); do
+              if [ -n "$EXCLUDE_PATTERN" ]; then
+                EXCLUDE_PATTERN="$EXCLUDE_PATTERN|$extra_type"
+              else
+                EXCLUDE_PATTERN="$extra_type"
+              fi
+            done
+          fi
+
+          echo "=== Waiting for cascade-deleted resources (excluding: $EXCLUDE_PATTERN) ==="
+
+          while true; do
+            # Get all managed resources, filter out header and extra resource types
+            MANAGED=$(kubectl get managed -n "$NS" --no-headers 2>/dev/null) || true
+
+            if [ -z "$MANAGED" ]; then
+              echo "$(date '+%H:%M:%S') - No managed resources remaining"
+              break
+            fi
+
+            # Filter out extra resource types
+            if [ -n "$EXCLUDE_PATTERN" ]; then
+              REMAINING=$(echo "$MANAGED" | grep -vE "$EXCLUDE_PATTERN") || true
+            else
+              REMAINING="$MANAGED"
+            fi
+
+            if [ -z "$REMAINING" ]; then
+              echo "$(date '+%H:%M:%S') - All cascade-deleted resources are gone"
+              break
+            fi
+
+            REMAINING_COUNT=$(echo "$REMAINING" | wc -l | tr -d ' ')
+            echo "$(date '+%H:%M:%S') - $REMAINING_COUNT resources remaining:"
+            echo "$REMAINING"
+            sleep 30
+          done
+
+      - name: Delete extra resources
+        if: always() && inputs.delete-extra-resources
+        timeout-minutes: ${{ inputs.delete-extra-resources-timeout-minutes }}
+        run: |
+          CLUSTER_NAME=$(kind get clusters | head -n1)
+          if [ -z "$CLUSTER_NAME" ]; then
+            echo "No kind cluster found, skipping"
+            exit 0
+          fi
+          kind export kubeconfig --name "$CLUSTER_NAME"
+
+          NS="${{ inputs.namespace }}"
+          TRACKED_FILE=$(mktemp)
+
+          EXTRA_TYPES='${{ inputs.delete-extra-resources }}'
+          echo "Deleting extra resource types: $EXTRA_TYPES"
+
+          for resource_type in $(echo "$EXTRA_TYPES" | jq -r '.[]'); do
+            if [ -n "$resource_type" ]; then
+              echo ""
+              echo "=== Discovering $resource_type resources ==="
+              NAMES=$(kubectl get "$resource_type" -n "$NS" --no-headers 2>/dev/null | awk '{print $1}')
+              for name in $NAMES; do
+                echo ""
+                echo "=== Tracing $resource_type/$name ==="
+                TRACE=$(crossplane beta trace "$resource_type" "$name" -n "$NS" 2>/dev/null) || true
+                if [ -n "$TRACE" ]; then
+                  echo "$TRACE"
+                  echo "$TRACE" | tail -n +2 \
+                    | awk '{for(i=1;i<=NF;i++){if($i ~ /\//){print $i; break}}}' \
+                    >> "$TRACKED_FILE"
+                fi
+
+                echo ""
+                echo "Deleting $resource_type/$name"
+                kubectl delete "$resource_type" "$name" -n "$NS" || true
+              done
+            fi
+          done
+
+          # Wait for all traced resources to be deleted
+          if [ -s "$TRACKED_FILE" ]; then
+            sort -u "$TRACKED_FILE" -o "$TRACKED_FILE"
+            TOTAL=$(wc -l < "$TRACKED_FILE" | tr -d ' ')
+            echo ""
+            echo "=== Waiting for $TOTAL resources to be deleted ==="
+
+            while true; do
+              REMAINING_COUNT=0
+              REMAINING_LIST=""
+              while IFS= read -r ref; do
+                if [ -n "$ref" ] && kubectl get "$ref" >/dev/null 2>&1; then
+                  REMAINING_COUNT=$((REMAINING_COUNT + 1))
+                  REMAINING_LIST="$REMAINING_LIST  $ref"$'\n'
+                fi
+              done < "$TRACKED_FILE"
+
+              if [ "$REMAINING_COUNT" -eq 0 ]; then
+                echo "$(date '+%H:%M:%S') - All extra resources deleted successfully"
+                break
+              fi
+
+              echo "$(date '+%H:%M:%S') - $REMAINING_COUNT/$TOTAL resources remaining:"
+              printf "%s" "$REMAINING_LIST"
+              sleep 30
+            done
+          else
+            echo "No resources to wait for"
+          fi
+
+          rm -f "$TRACKED_FILE"
 
       - name: (Debug) Log Remaining Managed Resources
         if: always() && steps.cleanup.outcome != 'success'
