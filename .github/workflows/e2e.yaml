@@ -43,6 +43,11 @@ on:
         required: false
         type: string
 
+      gh-owner:
+        description: "GitHub owner (org or user) for provider-upjet-github credentials"
+        required: false
+        type: string
+
       aws:
         description: "Enable AWS credentials setup"
         required: false
@@ -282,7 +287,7 @@ jobs:
           for dir in ${{ inputs.pattern }}; do
             if [ -d "$dir" ]; then
               mkdir -p "$dir/secrets"
-              printf '{"token":"%s"}' "${{ steps.github-app-token.outputs.token }}" > "$dir/secrets/github-creds"
+              printf '{"token":"%s","owner":"%s"}' "${{ steps.github-app-token.outputs.token }}" "${{ inputs.gh-owner || github.repository_owner }}" > "$dir/secrets/github-creds"
             fi
           done
 
