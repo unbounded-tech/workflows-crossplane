@@ -32,6 +32,17 @@ on:
         type: number
         default: 33
 
+      github:
+        description: "Enable GitHub credentials setup for provider-upjet-github via GitHub App"
+        required: false
+        type: boolean
+        default: false
+
+      gh-app-id:
+        description: "GitHub App ID for generating installation tokens"
+        required: false
+        type: string
+
       aws:
         description: "Enable AWS credentials setup"
         required: false
@@ -115,6 +126,10 @@ on:
     secrets:
       GH_PAT:
         description: "Token for ghcr.io package write access"
+        required: false
+
+      GH_APP_KEY:
+        description: "GitHub App private key for generating installation tokens (provider-upjet-github E2E tests)"
         required: false
 
       AWS_ACCESS_KEY_ID:
@@ -238,6 +253,36 @@ jobs:
             if [ -d "$dir" ]; then
               mkdir -p "$dir/secrets"
               cp ~/.aws/credentials "$dir/secrets/aws-creds"
+            fi
+          done
+
+      - name: Check for GitHub App credentials
+        if: inputs.github
+        run: |
+          if [ -z "${{ inputs.gh-app-id }}" ]; then
+            echo "gh-app-id must be set if github is enabled"
+            exit 1
+          fi
+          if [ -z "${{ secrets.GH_APP_KEY }}" ]; then
+            echo "GH_APP_KEY secret must be set if github is enabled"
+            exit 1
+          fi
+
+      - name: Generate GitHub App Token
+        if: inputs.github
+        id: github-app-token
+        uses: actions/create-github-app-token@v2
+        with:
+          app-id: ${{ inputs.gh-app-id }}
+          private-key: ${{ secrets.GH_APP_KEY }}
+
+      - name: Create GitHub Credentials
+        if: inputs.github
+        run: |
+          for dir in ${{ inputs.pattern }}; do
+            if [ -d "$dir" ]; then
+              mkdir -p "$dir/secrets"
+              printf '{"token":"%s"}' "${{ steps.github-app-token.outputs.token }}" > "$dir/secrets/github-creds"
             fi
           done
 
