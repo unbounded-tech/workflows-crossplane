@@ -212,6 +212,10 @@ A reusable workflow that runs end-to-end tests for Crossplane compositions using
 - `pattern` (optional): Test file pattern (default: `tests/e2e*`)
 - `timeout-minutes` (optional): Timeout in minutes for the e2e test step (default: `20`)
 - `cleanup-timeout-minutes` (optional): Timeout in minutes for the cleanup step (default: `10`)
+- `github` (optional): Enable GitHub credentials setup for `provider-upjet-github` (default: `false`)
+- `github-auth-mode` (optional): GitHub auth mode for `provider-upjet-github` credentials: `auto`, `app`, or `token` (default: `auto`)
+- `gh-app-id` (optional): GitHub App ID used when `github-auth-mode` is `app`; install it on the target owner with repository `Administration: write`
+- `gh-owner` (optional): GitHub owner (org or user) for `provider-upjet-github` credentials
 - `aws` (optional): Enable AWS credentials setup (default: `false`)
 - `aws-use-oidc` (optional): Use GitHub OIDC to assume an AWS role (default: `false`)
 - `aws-role-name` (optional): AWS IAM role name to assume via OIDC (default: `hops-github-actions`)
@@ -227,6 +231,8 @@ A reusable workflow that runs end-to-end tests for Crossplane compositions using
 #### Secrets
 
 - `GH_PAT` (optional): Personal access token for GitHub Container Registry write access (required if `ghcr_user` is provided)
+- `GH_PROVIDER_TOKEN` (optional): GitHub token or PAT for `provider-upjet-github` E2E tests when `github-auth-mode` is `token`; it needs repo admin access on the target owner (fine-grained: `Administration: write`, org-level resources may need `admin:org`)
+- `GH_APP_KEY` (optional): GitHub App private key for `provider-upjet-github` E2E tests when `github-auth-mode` is `app`; the app installation should have repository `Administration: write` on the target owner
 - `AWS_ACCESS_KEY_ID` (optional): AWS Access Key ID for E2E tests (required if `aws` is `true` and `aws-use-oidc` is `false`)
 - `AWS_SECRET_ACCESS_KEY` (optional): AWS Secret Access Key for E2E tests (required if `aws` is `true` and `aws-use-oidc` is `false`)
 - `AWS_SESSION_TOKEN` (optional): AWS Session Token for E2E tests (required for OIDC/assumed roles when providing credentials via secrets)
@@ -245,10 +251,11 @@ Requires the following permissions in the calling workflow:
 3. Installs Crossplane CLI
 4. Logs into GitHub Container Registry
 5. Builds the project using `up` (Upbound CLI)
-6. Creates AWS credentials file (if `aws: true`)
-7. Runs e2e tests using `up test run` with `--e2e` flag
-8. On test failure: logs debug info and deletes root resource type plus all `debug-resource-types`
-9. Waits for managed resources to be cleaned up
+6. Creates GitHub credentials files for `provider-upjet-github` using either app auth or a token (if `github: true`)
+7. Creates AWS credentials file (if `aws: true`)
+8. Runs e2e tests using `up test run` with `--e2e` flag
+9. On test failure: logs debug info and deletes root resource type plus all `debug-resource-types`
+10. Waits for managed resources to be cleaned up
 
 #### Usage
 
@@ -266,6 +273,35 @@ jobs:
     uses: unbounded-tech/workflows-crossplane/.github/workflows/e2e.yaml@main
     secrets:
       GH_PAT: ${{ secrets.GH_PAT }}
+```
+
+With `provider-upjet-github` credentials using a token:
+
+```yaml
+jobs:
+  e2e:
+    uses: unbounded-tech/workflows-crossplane/.github/workflows/e2e.yaml@main
+    with:
+      github: true
+      github-auth-mode: token
+      gh-owner: hops-ops
+    secrets:
+      GH_PROVIDER_TOKEN: ${{ secrets.GH_PROVIDER_TOKEN }}
+```
+
+With `provider-upjet-github` credentials using a GitHub App:
+
+```yaml
+jobs:
+  e2e:
+    uses: unbounded-tech/workflows-crossplane/.github/workflows/e2e.yaml@main
+    with:
+      github: true
+      github-auth-mode: app
+      gh-app-id: ${{ vars.GH_APP_ID }}
+      gh-owner: hops-ops
+    secrets:
+      GH_APP_KEY: ${{ secrets.GH_APP_KEY }}
 ```
 
 With AWS credentials using OIDC role assumption (recommended):
