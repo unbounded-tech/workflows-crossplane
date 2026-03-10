@@ -33,13 +33,19 @@ on:
         default: 33
 
       github:
-        description: "Enable GitHub credentials setup for provider-upjet-github via GitHub App"
+        description: "Enable GitHub credentials setup for provider-upjet-github"
         required: false
         type: boolean
         default: false
 
+      github-auth-mode:
+        description: 'GitHub auth mode for provider-upjet-github credentials: "auto", "app", or "token"'
+        required: false
+        type: string
+        default: "auto"
+
       gh-app-id:
-        description: "GitHub App ID for generating installation tokens"
+        description: "GitHub App ID used when github-auth-mode is app; install it on the target owner with repository Administration: write"
         required: false
         type: string
 
@@ -133,8 +139,12 @@ on:
         description: "Token for ghcr.io package write access"
         required: false
 
+      GH_PROVIDER_TOKEN:
+        description: "GitHub token or PAT for provider-upjet-github E2E tests; needs repo admin access on the target owner (fine-grained: Administration write, org-level resources may need admin:org)"
+        required: false
+
       GH_APP_KEY:
-        description: "GitHub App private key for generating installation tokens (provider-upjet-github E2E tests)"
+        description: "GitHub App private key for provider-upjet-github E2E tests; the app installation should have repository Administration: write on the target owner"
         required: false
 
       AWS_ACCESS_KEY_ID:
@@ -261,33 +271,112 @@ jobs:
             fi
           done
 
-      - name: Check for GitHub App credentials
+      - name: Resolve GitHub credentials mode
         if: inputs.github
+        id: github-auth
+        env:
+          GH_APP_ID: ${{ inputs.gh-app-id }}
+          GH_APP_KEY: ${{ secrets.GH_APP_KEY }}
+          GH_PROVIDER_TOKEN: ${{ secrets.GH_PROVIDER_TOKEN }}
+          GITHUB_AUTH_MODE: ${{ inputs.github-auth-mode }}
         run: |
-          if [ -z "${{ inputs.gh-app-id }}" ]; then
-            echo "gh-app-id must be set if github is enabled"
-            exit 1
-          fi
-          if [ -z "${{ secrets.GH_APP_KEY }}" ]; then
-            echo "GH_APP_KEY secret must be set if github is enabled"
-            exit 1
+          has_app=false
+          has_token=false
+
+          if [ -n "$GH_APP_ID" ] && [ -n "$GH_APP_KEY" ]; then
+            has_app=true
           fi
 
-      - name: Generate GitHub App Token
-        if: inputs.github
-        id: github-app-token
+          if [ -n "$GH_PROVIDER_TOKEN" ]; then
+            has_token=true
+          fi
+
+          case "$GITHUB_AUTH_MODE" in
+            auto)
+              if [ "$has_app" = true ] && [ "$has_token" = true ]; then
+                echo "Both GitHub App credentials and GH_PROVIDER_TOKEN are set; set github-auth-mode to app or token"
+                exit 1
+              fi
+              if [ "$has_app" = true ]; then
+                echo "mode=app" >> "$GITHUB_OUTPUT"
+                exit 0
+              fi
+              if [ "$has_token" = true ]; then
+                echo "mode=token" >> "$GITHUB_OUTPUT"
+                exit 0
+              fi
+              echo "github is enabled, but neither GitHub App credentials nor GH_PROVIDER_TOKEN were provided"
+              exit 1
+              ;;
+            app)
+              if [ "$has_app" != true ]; then
+                echo "gh-app-id and GH_APP_KEY must be set when github-auth-mode is app"
+                exit 1
+              fi
+              echo "mode=app" >> "$GITHUB_OUTPUT"
+              ;;
+            token)
+              if [ "$has_token" != true ]; then
+                echo "GH_PROVIDER_TOKEN must be set when github-auth-mode is token"
+                exit 1
+              fi
+              echo "mode=token" >> "$GITHUB_OUTPUT"
+              ;;
+            *)
+              echo "github-auth-mode must be one of: auto, app, token"
+              exit 1
+              ;;
+          esac
+
+      - name: Resolve GitHub App Installation
+        if: inputs.github && steps.github-auth.outputs.mode == 'app'
+        id: github-app
         uses: actions/create-github-app-token@v2
         with:
           app-id: ${{ inputs.gh-app-id }}
           private-key: ${{ secrets.GH_APP_KEY }}
+          owner: ${{ inputs.gh-owner || github.repository_owner }}
 
       - name: Create GitHub Credentials
         if: inputs.github
+        env:
+          GH_APP_ID: ${{ inputs.gh-app-id }}
+          GH_APP_INSTALLATION_ID: ${{ steps.github-app.outputs.installation-id }}
+          GH_APP_KEY: ${{ secrets.GH_APP_KEY }}
+          GH_AUTH_MODE: ${{ steps.github-auth.outputs.mode }}
+          GH_OWNER: ${{ inputs.gh-owner || github.repository_owner }}
+          GH_PROVIDER_TOKEN: ${{ secrets.GH_PROVIDER_TOKEN }}
         run: |
+          if [ "$GH_AUTH_MODE" = "app" ]; then
+            if [ -z "$GH_APP_INSTALLATION_ID" ]; then
+              echo "Unable to resolve GitHub App installation ID"
+              exit 1
+            fi
+
+            # Normalize PEM input so secrets stored with literal '\n' escapes
+            # and secrets stored as multiline values both serialize correctly.
+            normalized_pem=$(printf '%b' "$GH_APP_KEY")
+            normalized_pem=${normalized_pem//$'\r'/}
+            github_creds=$(jq -cn \
+              --arg owner "$GH_OWNER" \
+              --arg app_id "$GH_APP_ID" \
+              --arg installation_id "$GH_APP_INSTALLATION_ID" \
+              --arg pem_file "$normalized_pem" \
+              '{owner:$owner, app_auth:[{id:$app_id, installation_id:$installation_id, pem_file:$pem_file}]}')
+          elif [ "$GH_AUTH_MODE" = "token" ]; then
+            github_creds=$(jq -cn \
+              --arg owner "$GH_OWNER" \
+              --arg token "$GH_PROVIDER_TOKEN" \
+              '{owner:$owner, token:$token}')
+          else
+            echo "Unsupported GitHub auth mode: $GH_AUTH_MODE"
+            exit 1
+          fi
+
           for dir in ${{ inputs.pattern }}; do
             if [ -d "$dir" ]; then
               mkdir -p "$dir/secrets"
-              printf '{"token":"%s","owner":"%s"}' "${{ steps.github-app-token.outputs.token }}" "${{ inputs.gh-owner || github.repository_owner }}" > "$dir/secrets/github-creds"
+              printf '%s' "$github_creds" > "$dir/secrets/github-creds"
             fi
           done
 
