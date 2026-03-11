@@ -400,6 +400,10 @@ jobs:
               fi
               # Write custom env vars from JSON object
               echo '${{ inputs.env-vars }}' | jq -r 'to_entries[] | "\(.key)\t\(.value)"' | while IFS=$'\t' read -r key value; do
+                if ! echo "$key" | grep -qE '^[A-Za-z_][A-Za-z0-9_]*$'; then
+                  echo "ERROR: invalid env var name: '$key'" >&2
+                  exit 1
+                fi
                 printf '%s' "$value" > "$dir/env/$key"
               done
             fi
