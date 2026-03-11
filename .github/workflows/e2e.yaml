@@ -134,6 +134,11 @@ on:
         type: string
         default: "default"
 
+      env-vars:
+        description: 'JSON object of env vars to write as files in env/ dir for KCL tests (e.g., {"SUBNET_A": "subnet-xxx"}). Each key becomes a file under tests/*/env/ containing the value.'
+        required: false
+        type: string
+
     secrets:
       GH_PAT:
         description: "Token for ghcr.io package write access"
@@ -377,6 +382,26 @@ jobs:
             if [ -d "$dir" ]; then
               mkdir -p "$dir/secrets"
               printf '%s' "$github_creds" > "$dir/secrets/github-creds"
+            fi
+          done
+
+      - name: Write env vars to files
+        if: inputs.env-vars
+        run: |
+          for dir in ${{ inputs.pattern }}; do
+            if [ -d "$dir" ]; then
+              mkdir -p "$dir/env"
+              # Write AWS_ACCOUNT_ID and AWS_REGION if aws is enabled
+              if [ "${{ inputs.aws }}" = "true" ]; then
+                if [ -n "${{ inputs.aws-account-id }}" ]; then
+                  printf '%s' "${{ inputs.aws-account-id }}" > "$dir/env/AWS_ACCOUNT_ID"
+                fi
+                printf '%s' "${{ inputs.aws-region }}" > "$dir/env/AWS_REGION"
+              fi
+              # Write custom env vars from JSON object
+              echo '${{ inputs.env-vars }}' | jq -r 'to_entries[] | "\(.key)\t\(.value)"' | while IFS=$'\t' read -r key value; do
+                printf '%s' "$value" > "$dir/env/$key"
+              done
             fi
           done
 
