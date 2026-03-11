@@ -134,8 +134,14 @@ on:
         type: string
         default: "default"
 
+      write-env-files:
+        description: 'Write AWS_ACCOUNT_ID and AWS_REGION as files in env/ dir for KCL tests. Requires aws: true.'
+        required: false
+        type: boolean
+        default: false
+
       env-vars:
-        description: 'JSON object of env vars to write as files in env/ dir for KCL tests (e.g., {"SUBNET_A": "subnet-xxx"}). Each key becomes a file under tests/*/env/ containing the value.'
+        description: 'JSON object of env vars to write as files in env/ dir for KCL tests (e.g., {"SUBNET_A": "subnet-xxx"}). Each key becomes a file under tests/*/env/ containing the value. Implies write-env-files.'
         required: false
         type: string
 
@@ -385,20 +391,25 @@ jobs:
             fi
           done
 
-      - name: Write env vars to files
-        if: inputs.env-vars
+      - name: Write AWS env vars to files
+        if: inputs.write-env-files && inputs.aws
         run: |
           for dir in ${{ inputs.pattern }}; do
             if [ -d "$dir" ]; then
               mkdir -p "$dir/env"
-              # Write AWS_ACCOUNT_ID and AWS_REGION if aws is enabled
-              if [ "${{ inputs.aws }}" = "true" ]; then
-                if [ -n "${{ inputs.aws-account-id }}" ]; then
-                  printf '%s' "${{ inputs.aws-account-id }}" > "$dir/env/AWS_ACCOUNT_ID"
-                fi
-                printf '%s' "${{ inputs.aws-region }}" > "$dir/env/AWS_REGION"
+              if [ -n "${{ inputs.aws-account-id }}" ]; then
+                printf '%s' "${{ inputs.aws-account-id }}" > "$dir/env/AWS_ACCOUNT_ID"
               fi
-              # Write custom env vars from JSON object
+              printf '%s' "${{ inputs.aws-region }}" > "$dir/env/AWS_REGION"
+            fi
+          done
+
+      - name: Write custom env vars to files
+        if: inputs.write-env-files && inputs.env-vars
+        run: |
+          for dir in ${{ inputs.pattern }}; do
+            if [ -d "$dir" ]; then
+              mkdir -p "$dir/env"
               echo '${{ inputs.env-vars }}' | jq -r 'to_entries[] | "\(.key)\t\(.value)"' | while IFS=$'\t' read -r key value; do
                 if ! echo "$key" | grep -qE '^[A-Za-z_][A-Za-z0-9_]*$'; then
                   echo "ERROR: invalid env var name: '$key'" >&2
