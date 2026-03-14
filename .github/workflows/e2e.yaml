@@ -342,7 +342,7 @@ jobs:
       - name: Resolve GitHub App Installation
         if: inputs.github && steps.github-auth.outputs.mode == 'app'
         id: github-app
-        uses: actions/create-github-app-token@v2
+        uses: actions/create-github-app-token@v3
         with:
           app-id: ${{ inputs.gh-app-id }}
           private-key: ${{ secrets.GH_APP_KEY }}
