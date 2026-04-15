@@ -46,7 +46,7 @@ jobs:
           key: ${{ runner.os }}-crossplane-${{ hashFiles('**/upbound.yaml','**/definition.yaml') }}-
 
       - name: Install & login with up
-        uses: upbound/action-up@v1.0.0
+        uses: upbound/action-up@v1.2.0
         with:
           skip-login: true
 
