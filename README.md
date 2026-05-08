@@ -96,11 +96,12 @@ A reusable workflow that validates Crossplane compositions and examples using th
 #### Inputs
 
 - `composition` (optional): Composition YAML filename (default: `composition.yaml`)
-- `examples` (required): Examples input. Accepts either a single example string or a JSON array. JSON arrays can be of strings (legacy) or objects (new format with observed_resources):
+- `examples` (required): Examples input. Accepts either a single example string or a JSON array. JSON arrays can be of strings (legacy) or objects (new format with `observed_resources` and/or `api_path`):
   - Single example: `"examples/claim.yaml"`
   - Array of strings: `["examples/claim.yaml", "examples/another.yaml"]`
-  - Array of objects: `[{"example": "examples/claim.yaml", "observed_resources": "examples/observed-resources/step-1/"}]`
-- `api_path` (required): Path to your API directory containing your XRD definitions
+  - Array of objects (single API): `[{"example": "examples/claim.yaml", "observed_resources": "examples/observed-resources/step-1/"}]`
+  - Array of objects (multi-API): `[{"example": "examples/foo/minimal.yaml", "api_path": "apis/foos"}, {"example": "examples/bar/minimal.yaml", "api_path": "apis/bars"}]`
+- `api_path` (optional): Path to your API directory containing your XRD definitions. Used as fallback when an example does not specify its own `api_path`. Required if no examples specify `api_path`.
 - `crossplane_version` (optional): Crossplane CLI version to install (default: `v2.0.2`)
 - `error_on_missing_schemas` (optional): Whether to error on missing schemas during validation (default: `true`)
 - `ghcr_user` (optional): GitHub Container Registry username for pushing images
@@ -148,6 +149,26 @@ jobs:
     secrets:
       GH_PAT: ${{ secrets.GH_PAT }}
 ```
+
+##### Multi-API repos
+
+For repositories that contain multiple XRDs in separate `apis/<name>/` subdirectories, specify `api_path` per example instead of (or in addition to) the top-level input:
+
+```yaml
+jobs:
+  validate:
+    uses: unbounded-tech/workflows-crossplane/.github/workflows/validate.yaml@main
+    with:
+      examples: |
+        [
+          { "example": "examples/foos/minimal.yaml", "api_path": "apis/foos" },
+          { "example": "examples/bars/minimal.yaml", "api_path": "apis/bars" }
+        ]
+    secrets:
+      GH_PAT: ${{ secrets.GH_PAT }}
+```
+
+Each matrix run resolves `api_path` per example: the per-example value takes precedence, otherwise the top-level `inputs.api_path` is used. The validation fails fast if neither is set for a given example.
 
 #### Prerequisites
 

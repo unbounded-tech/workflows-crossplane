@@ -27,9 +27,10 @@ on:
         default: 'v2.0.2'
 
       api_path:
-        description: 'Path to your API directory'
-        required: true
+        description: 'Path to your API directory. Optional if each example specifies its own api_path; used as fallback otherwise.'
+        required: false
         type: string
+        default: ''
 
       error_on_missing_schemas:
         description: 'Whether to error on missing schemas during validation'
@@ -138,19 +139,36 @@ jobs:
         with:
           skip-login-check: true
 
+      - name: Resolve api_path
+        id: resolve
+        run: |
+          per_example="${{ matrix.example.api_path }}"
+          fallback="${{ inputs.api_path }}"
+          if [ -n "$per_example" ]; then
+            api_path="$per_example"
+          else
+            api_path="$fallback"
+          fi
+          if [ -z "$api_path" ]; then
+            echo "ERROR: no api_path resolved for example '${{ matrix.example.example }}'."
+            echo "Set inputs.api_path (single-API repo) or matrix.example.api_path (multi-API repo)."
+            exit 1
+          fi
+          echo "api_path=$api_path" >> "$GITHUB_OUTPUT"
+
       - name: Generate configuration metadata from upbound.yaml
         run: |
           set -euo pipefail
 
           upbound_file="upbound.yaml"
-          output_file="${{ inputs.api_path }}/configuration.yaml"
+          output_file="${{ steps.resolve.outputs.api_path }}/configuration.yaml"
 
           if [ ! -f "$upbound_file" ]; then
             echo "Expected $upbound_file at repository root."
             exit 1
           fi
 
-          mkdir -p "${{ inputs.api_path }}"
+          mkdir -p "${{ steps.resolve.outputs.api_path }}"
 
           python3 - "$upbound_file" "$output_file" <<'PY'
           import re
@@ -238,13 +256,13 @@ jobs:
             observed_flag="--observed-resources=${{ matrix.example.observed_resources }}"
           fi
           up composition render \
-            ${{ inputs.api_path }}/${{ inputs.composition }} \
+            ${{ steps.resolve.outputs.api_path }}/${{ inputs.composition }} \
             ${{ matrix.example.example }} \
             $observed_flag
 
       - name: Validate Example
         run: |
-          ./crossplane beta validate ${{ matrix.example.example }} ${{ inputs.api_path }}
+          ./crossplane beta validate ${{ matrix.example.example }} ${{ steps.resolve.outputs.api_path }}
 
       - name: Validate Rendered Example
         run: |
@@ -257,8 +275,8 @@ jobs:
             observed_flag="--observed-resources=${{ matrix.example.observed_resources }}"
           fi
           up composition render \
-            ${{ inputs.api_path }}/${{ inputs.composition }} \
+            ${{ steps.resolve.outputs.api_path }}/${{ inputs.composition }} \
             ${{ matrix.example.example }} \
             --include-full-xr --quiet \
             $observed_flag \
-          | ./crossplane beta validate ${{ inputs.api_path }} $flag -
+          | ./crossplane beta validate ${{ steps.resolve.outputs.api_path }} $flag -
