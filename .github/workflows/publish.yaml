@@ -78,12 +78,12 @@ jobs:
           password: ${{ github.token }}
 
       - name: Build with up
-        uses: upbound/action-up-project@v1.1.2
+        uses: upbound/action-up-project@v1.2.0
         with:
           skip-login-check: true
 
       - name: Publish
-        uses: upbound/action-up-project@v1.1.2
+        uses: upbound/action-up-project@v1.2.0
         with:
           push-project: true
           skip-login-check: true
